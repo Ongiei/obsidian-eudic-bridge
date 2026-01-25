@@ -216,7 +216,7 @@ export default class LinkDictPlugin extends Plugin {
 		let content = `# ${word}\n\n`;
 
 		if (entry.p) {
-			content += `音标: /${entry.p}/\n\n`;
+			content += `音标: \`/${entry.p}/\`\n\n`;
 		}
 
 		if (entry.t) {
