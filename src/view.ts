@@ -76,10 +76,9 @@ export class DictionaryView extends ItemView {
 			return;
 		}
 
-		const searchWord = word.toLowerCase();
-		const entry = this.plugin.dictionary[searchWord];
+		const result = this.plugin.findEntry(word, false);
 
-		if (!entry) {
+		if (!result) {
 			this.resultContainer.empty();
 			const message = this.resultContainer.createEl('p');
 			message.addClass('link-dict-message');
@@ -90,22 +89,11 @@ export class DictionaryView extends ItemView {
 			return;
 		}
 
-		let finalEntry = entry;
-		let lemma = searchWord;
+		const { entry, word: lemma } = result;
 
-		if (entry.e && entry.e.startsWith('0:')) {
-			const lemmaMatch = entry.e.match(/^0:([a-zA-Z]+)/);
-			if (lemmaMatch && lemmaMatch[1]) {
-				lemma = lemmaMatch[1];
-				const lemmaEntry = this.plugin.dictionary[lemma];
-				if (lemmaEntry) {
-					finalEntry = lemmaEntry;
-				}
-			}
-		}
-
-		const markdown = this.plugin.generateMarkdown(lemma, finalEntry);
 		this.resultContainer.empty();
+
+		const markdown = this.plugin.generateMarkdown(lemma, entry);
 		await MarkdownRenderer.render(this.app, markdown, this.resultContainer, '', this);
 	}
 }

@@ -2,6 +2,8 @@ import {Editor, MarkdownView, Menu, Notice, Plugin, requestUrl, TFile, Workspace
 import {DEFAULT_SETTINGS, LinkDictSettings, LinkDictSettingTab} from "./settings";
 import {DictionaryView} from "./view";
 
+import winkLemmatizer from 'wink-lemmatizer';
+
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
 
 interface DictEntry {
@@ -125,38 +127,49 @@ export default class LinkDictPlugin extends Plugin {
 		}
 	}
 
-	async searchAndGenerateNote(searchWord: string, editor?: Editor): Promise<void> {
-		let finalEntry: DictEntry | null = null;
-		let lemma = searchWord;
+	public findEntry(word: string, useLemmatizer: boolean = true): { entry: DictEntry; word: string } | null {
+		const searchWord = word.toLowerCase().trim();
 
-		const entry = this.dictionary[searchWord];
-		if (!entry) {
+		if (!searchWord) {
+			return null;
+		}
+
+		if (useLemmatizer) {
+			const nounLemma = winkLemmatizer.noun(searchWord);
+			if (nounLemma !== searchWord && this.dictionary[nounLemma]) {
+				return { entry: this.dictionary[nounLemma], word: nounLemma };
+			}
+
+			const verbLemma = winkLemmatizer.verb(searchWord);
+			if (verbLemma !== searchWord && this.dictionary[verbLemma]) {
+				return { entry: this.dictionary[verbLemma], word: verbLemma };
+			}
+
+			const adjectiveLemma = winkLemmatizer.adjective(searchWord);
+			if (adjectiveLemma !== searchWord && this.dictionary[adjectiveLemma]) {
+				return { entry: this.dictionary[adjectiveLemma], word: adjectiveLemma };
+			}
+		}
+
+		const exactEntry = this.dictionary[searchWord];
+		if (exactEntry) {
+			return { entry: exactEntry, word: searchWord };
+		}
+
+		return null;
+	}
+
+	async searchAndGenerateNote(searchWord: string, editor?: Editor): Promise<void> {
+		const result = this.findEntry(searchWord, true);
+
+		if (!result) {
 			new Notice(`Word "${searchWord}" not found in dictionary`);
 			return;
 		}
 
-		if (entry.e && entry.e.startsWith('0:')) {
-			const lemmaMatch = entry.e.match(/^0:([a-zA-Z]+)/);
-			if (lemmaMatch && lemmaMatch[1]) {
-				lemma = lemmaMatch[1];
-				const lemmaEntry = this.dictionary[lemma];
-				if (lemmaEntry) {
-					finalEntry = lemmaEntry;
-				} else {
-					new Notice(`Lemma "${lemma}" not found in dictionary`);
-					return;
-				}
-			}
-		} else {
-			finalEntry = entry;
-		}
+		const { entry, word: lemma } = result;
 
-		if (!finalEntry) {
-			new Notice(`No entry found for "${lemma}"`);
-			return;
-		}
-
-		await this.createWordFile(lemma, finalEntry);
+		await this.createWordFile(lemma, entry, searchWord);
 
 		if (this.settings.replaceWithLink && editor) {
 			const selectedText = editor.getSelection();
@@ -236,7 +249,7 @@ export default class LinkDictPlugin extends Plugin {
 		return formattedParts;
 	}
 
-	generateMarkdown(word: string, entry: DictEntry): string {
+	generateMarkdown(word: string, entry: DictEntry, originalWord?: string): string {
 		const tags: string[] = ['vocabulary'];
 
 		const posTags = this.extractPosTags(entry.t);
@@ -246,14 +259,20 @@ export default class LinkDictPlugin extends Plugin {
 
 		const aliases = this.extractAliases(entry);
 
+		if (originalWord && originalWord.toLowerCase() !== word.toLowerCase()) {
+			aliases.push(originalWord);
+		}
+
+		const uniqueAliases = [...new Set(aliases)].filter(a => a && a.trim() !== '');
+
 		let yaml = '---\n';
 		yaml += 'tags:\n';
 		for (const tag of uniqueTags) {
 			yaml += `  - ${tag}\n`;
 		}
-		if (aliases.length > 0) {
+		if (uniqueAliases.length > 0) {
 			yaml += 'aliases:\n';
-			for (const alias of aliases) {
+			for (const alias of uniqueAliases) {
 				yaml += `  - ${alias}\n`;
 			}
 		}
@@ -292,7 +311,7 @@ export default class LinkDictPlugin extends Plugin {
 		return yaml + content;
 	}
 
-	async createWordFile(word: string, entry: DictEntry) {
+	async createWordFile(word: string, entry: DictEntry, originalWord?: string) {
 		const folderPath = this.settings.folderPath;
 		const fileName = `${word}.md`;
 		const filePath = `${folderPath}/${fileName}`;
@@ -304,7 +323,7 @@ export default class LinkDictPlugin extends Plugin {
 			}
 
 			const fileExists = await this.app.vault.adapter.exists(filePath);
-			const markdown = this.generateMarkdown(word, entry);
+			const markdown = this.generateMarkdown(word, entry, originalWord);
 
 			if (fileExists) {
 				const abstractFile = this.app.vault.getAbstractFileByPath(filePath);
