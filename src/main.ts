@@ -1,30 +1,29 @@
-import {Editor, MarkdownView, Menu, Notice, Plugin, requestUrl, TFile, WorkspaceLeaf} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf} from 'obsidian';
 import {DEFAULT_SETTINGS, LinkDictSettings, LinkDictSettingTab} from "./settings";
 import {DictionaryView} from "./view";
 import {DefinitionPopover} from "./popover";
+import {YoudaoService} from "./youdao";
 
 import winkLemmatizer from 'wink-lemmatizer';
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
 
-interface DictEntry {
-	p?: string;
-	t?: string;
-	e?: string;
-	g?: string;
-}
-
-interface DictionaryDB {
-	[key: string]: DictEntry;
+export interface DictEntry {
+	word: string;
+	ph_en: string;
+	ph_am: string;
+	mp3_en: string;
+	mp3_am: string;
+	definitions: { pos: string; trans: string }[];
+	tags: string[];
+	exchange: { name: string; value: string }[];
 }
 
 export default class LinkDictPlugin extends Plugin {
 	settings: LinkDictSettings;
-	dictionary: DictionaryDB = new Object() as DictionaryDB;
 
 	async onload() {
 		await this.loadSettings();
-		await this.loadDictionary();
 
 		this.registerView(VIEW_TYPE_LINK_DICT, (leaf) => new DictionaryView(leaf, this));
 
@@ -56,23 +55,25 @@ export default class LinkDictPlugin extends Plugin {
 		this.addCommand({
 			id: 'lookup-selection',
 			name: 'Look up selection',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
 				const selectedText = editor.getSelection();
 				if (!selectedText || selectedText.trim() === '') {
 					new Notice('Please select a word to look up');
 					return;
 				}
-				const result = this.findEntry(selectedText, false);
+				const popover = new DefinitionPopover(this, editor, selectedText);
+				const result = await this.findEntry(selectedText, false);
 				if (result) {
-					new DefinitionPopover(this, editor, selectedText, result.entry);
+					popover.setEntry(result.entry);
 				} else {
+					popover.close();
 					new Notice(`No definition found for: ${selectedText}`);
 				}
 			}
 		});
 
 		this.registerEvent(
-			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor, view: MarkdownView) => {
+			this.app.workspace.on('editor-menu', async (menu: Menu, editor: Editor, view: MarkdownView) => {
 				const selection = editor.getSelection();
 				console.debug('LinkDict: Editor menu triggered. Selection:', selection);
 
@@ -94,18 +95,20 @@ export default class LinkDictPlugin extends Plugin {
 					item
 						.setTitle('Look up selection')
 						.setIcon('search')
-						.onClick(() => {
+						.onClick(async () => {
 							if (!selection || selection.trim() === '') {
 								new Notice('Please select a word first.');
 								return;
 							}
 							console.debug('LinkDict: Looking up word:', selection);
-							const result = this.findEntry(selection, false);
+							const popover = new DefinitionPopover(this, editor, selection);
+							const result = await this.findEntry(selection, false);
 							if (result) {
 								console.debug('LinkDict: Entry found, creating popover');
-								new DefinitionPopover(this, editor, selection, result.entry);
+								popover.setEntry(result.entry);
 							} else {
 								console.debug('LinkDict: No entry found for:', selection);
+								popover.close();
 								new Notice(`No definition found for: ${selection}`);
 							}
 						});
@@ -127,81 +130,43 @@ export default class LinkDictPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	async loadDictionary() {
-		try {
-			const dictionaryPath = `${this.manifest.dir}/dictionary.json`;
-			const fileExists = await this.app.vault.adapter.exists(dictionaryPath);
-			
-			if (!fileExists) {
-				new Notice('Dictionary file missing, please download in settings.\n检测到缺少词典文件，请前往插件设置页进行下载。');
-				return;
-			}
-			
-			const dictionaryContent = await this.app.vault.adapter.read(dictionaryPath);
-			this.dictionary = JSON.parse(dictionaryContent) as DictionaryDB;
-			new Notice(`Dictionary loaded: ${Object.keys(this.dictionary).length} entries`);
-		} catch (error) {
-			new Notice('Failed to load dictionary.json');
-			console.error('Error loading dictionary:', error);
-		}
-	}
-
-	async downloadDictionary() {
-		try {
-			const url = `https://github.com/Ongiei/obsidian-link-dict/releases/download/${this.manifest.version}/dictionary.json`;
-			const dictionaryContent = await requestUrl({url});
-			
-			if (dictionaryContent.status !== 200) {
-				throw new Error(`HTTP error! status: ${dictionaryContent.status}`);
-			}
-			
-			const dictionaryPath = `${this.manifest.dir}/dictionary.json`;
-			
-			await this.app.vault.adapter.write(dictionaryPath, dictionaryContent.text);
-			
-			await this.loadDictionary();
-			
-			new Notice('词典下载成功！');
-		} catch (error) {
-			new Notice('Failed to download dictionary');
-			console.error('Error downloading dictionary:', error);
-		}
-	}
-
-	public findEntry(word: string, useLemmatizer: boolean = true): { entry: DictEntry; word: string } | null {
+	public async findEntry(word: string, useLemmatizer: boolean = true): Promise<{ entry: DictEntry; word: string } | null> {
 		const searchWord = word.toLowerCase().trim();
 
 		if (!searchWord) {
 			return null;
 		}
 
+		let lookupWord = searchWord;
+
 		if (useLemmatizer) {
 			const nounLemma = winkLemmatizer.noun(searchWord);
-			if (nounLemma !== searchWord && this.dictionary[nounLemma]) {
-				return { entry: this.dictionary[nounLemma], word: nounLemma };
+			if (nounLemma !== searchWord) {
+				lookupWord = nounLemma;
 			}
 
 			const verbLemma = winkLemmatizer.verb(searchWord);
-			if (verbLemma !== searchWord && this.dictionary[verbLemma]) {
-				return { entry: this.dictionary[verbLemma], word: verbLemma };
+			if (verbLemma !== searchWord && verbLemma !== nounLemma) {
+				lookupWord = verbLemma;
 			}
 
 			const adjectiveLemma = winkLemmatizer.adjective(searchWord);
-			if (adjectiveLemma !== searchWord && this.dictionary[adjectiveLemma]) {
-				return { entry: this.dictionary[adjectiveLemma], word: adjectiveLemma };
+			if (adjectiveLemma !== searchWord && adjectiveLemma !== nounLemma && adjectiveLemma !== verbLemma) {
+				lookupWord = adjectiveLemma;
 			}
 		}
 
-		const exactEntry = this.dictionary[searchWord];
-		if (exactEntry) {
-			return { entry: exactEntry, word: searchWord };
+		const entry = await YoudaoService.lookup(lookupWord);
+
+		if (!entry) {
+			return null;
 		}
 
-		return null;
+		return { entry, word: lookupWord };
 	}
 
 	async searchAndGenerateNote(searchWord: string, editor?: Editor): Promise<void> {
-		const result = this.findEntry(searchWord, true);
+		const result = await this.findEntry(searchWord, true);
 
 		if (!result) {
 			new Notice(`Word "${searchWord}" not found in dictionary`);
@@ -225,80 +190,26 @@ export default class LinkDictPlugin extends Plugin {
 		}
 	}
 
-	extractPosTags(translation: string | undefined): string[] {
-		const posTags: string[] = [];
-		if (!translation) return posTags;
-
-		const lines = translation.split('\\n');
-		const posRegex = /^([a-z]+)\./;
-
-		for (const line of lines) {
-			const match = line.match(posRegex);
-			if (match) {
-				const pos = match[1];
-				posTags.push(`pos/${pos}`);
-			}
-		}
-
-		return posTags;
-	}
-
-	extractAliases(entry: DictEntry): string[] {
-		const aliases: string[] = [];
-		if (!entry.e) return aliases;
-
-		const parts = entry.e.split('/');
-		for (const part of parts) {
-			if (part && part.includes(':')) {
-				const [, word] = part.split(':');
-				if (word && word.trim() !== '') {
-					aliases.push(word.trim());
-				}
-			}
-		}
-
-		return [...new Set(aliases)].sort();
-	}
-
-	formatExchange(exchange: string | undefined): string[] {
-		if (!exchange) return [];
-
-		const typeNames: { [key: string]: string } = {
-			p: '过去式',
-			d: '过去分词',
-			i: '现在分词',
-			3: '第三人称单数',
-			r: '形容词比较级',
-			t: '形容词最高级',
-			s: '名词复数形式',
-			0: '原型',
-			1: '变换形式'
-		};
-
-		const parts = exchange.split('/');
-		const formattedParts: string[] = [];
-
-		for (const part of parts) {
-			if (part && part.includes(':')) {
-				const [type, word] = part.split(':');
-				if (word && type && typeNames[type]) {
-					formattedParts.push(`- ${word} (${typeNames[type]})`);
-				}
-			}
-		}
-
-		return formattedParts;
-	}
-
 	generateMarkdown(word: string, entry: DictEntry, originalWord?: string): string {
-		const tags: string[] = ['vocabulary'];
+		const tags = new Set<string>(['vocabulary']);
 
-		const posTags = this.extractPosTags(entry.t);
-		tags.push(...posTags);
+		if (this.settings.saveTags && entry.tags.length > 0) {
+			entry.tags.forEach(t => tags.add(`exam/${t}`));
+		}
 
-		const uniqueTags = [...new Set(tags)];
+		entry.definitions.forEach(def => {
+			if (def.pos) {
+				const posTag = def.pos.replace(/\./g, '');
+				tags.add(`pos/${posTag}`);
+			}
+		});
 
-		const aliases = this.extractAliases(entry);
+		const uniqueTags = Array.from(tags);
+
+		const aliases: string[] = [];
+		entry.exchange.forEach(item => {
+			aliases.push(item.value);
+		});
 
 		if (originalWord && originalWord.toLowerCase() !== word.toLowerCase()) {
 			aliases.push(originalWord);
@@ -321,32 +232,36 @@ export default class LinkDictPlugin extends Plugin {
 
 		let content = `# ${word}\n\n`;
 
-		if (entry.p) {
-			content += `音标: \`/${entry.p}/\`\n\n`;
+		if (entry.ph_en || entry.ph_am) {
+			content += '## 发音\n\n';
+			if (entry.ph_en) {
+				content += `- 英: \`/${entry.ph_en}/\`\n`;
+			}
+			if (entry.ph_am) {
+				content += `- 美: \`/${entry.ph_am}/\`\n`;
+			}
+			content += '\n';
 		}
 
-		if (entry.t) {
-			const translation = entry.t.replace(/\\n/g, '\n');
-			const lines = translation.split('\n').filter(line => line.trim() !== '');
-			if (lines.length > 0) {
-				content += '## 释义\n\n';
-				for (const line of lines) {
-					const escapedLine = line.trim().replace(/\[/g, '\\[');
-					content += `- ${escapedLine}\n`;
+		if (entry.definitions.length > 0) {
+			content += '## 释义\n\n';
+			for (const def of entry.definitions) {
+				const escapedTrans = def.trans.replace(/\[/g, '\\[');
+				if (def.pos) {
+					content += `- ***${def.pos}*** ${escapedTrans}\n`;
+				} else {
+					content += `- ${escapedTrans}\n`;
 				}
-				content += '\n';
 			}
+			content += '\n';
 		}
 
-		if (entry.e) {
-			const formattedExchange = this.formatExchange(entry.e);
-			if (formattedExchange.length > 0) {
-				content += '## 变形\n\n';
-				for (const item of formattedExchange) {
-					content += `${item}\n`;
-				}
-				content += '\n';
+		if (entry.exchange.length > 0) {
+			content += '## 变形\n\n';
+			for (const item of entry.exchange) {
+				content += `- ${item.name}: ${item.value}\n`;
 			}
+			content += '\n';
 		}
 
 		return yaml + content;
