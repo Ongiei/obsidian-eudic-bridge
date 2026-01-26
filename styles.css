@@ -46,3 +46,60 @@
 .link-dict-error {
 	color: var(--text-error);
 }
+
+.link-dict-popover {
+	position: absolute;
+	z-index: var(--layer-popover, 9999);
+	background-color: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+	width: 300px;
+	padding: 12px;
+	border-radius: 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	color: var(--text-normal);
+}
+
+.popover-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding-bottom: 8px;
+	margin-bottom: 8px;
+}
+
+.popover-title-group {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	flex-grow: 1;
+}
+
+.popover-create-btn {
+	font-size: 12px;
+	padding: 2px 8px;
+	height: 24px;
+	background-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.popover-create-btn:hover {
+	opacity: 0.9;
+}
+
+.popover-phonetic {
+	color: var(--text-muted);
+	font-size: 0.8em;
+	margin-left: 8px;
+}
+
+.popover-body {
+	margin-bottom: 10px;
+}

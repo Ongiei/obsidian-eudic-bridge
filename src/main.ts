@@ -1,6 +1,7 @@
 import {Editor, MarkdownView, Menu, Notice, Plugin, requestUrl, TFile, WorkspaceLeaf} from 'obsidian';
 import {DEFAULT_SETTINGS, LinkDictSettings, LinkDictSettingTab} from "./settings";
 import {DictionaryView} from "./view";
+import {DefinitionPopover} from "./popover";
 
 import winkLemmatizer from 'wink-lemmatizer';
 
@@ -54,21 +55,43 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.registerEvent(
 			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor, view: MarkdownView) => {
-				const selectedText = editor.getSelection();
-				if (selectedText && selectedText.trim() !== '') {
-					const displayText = selectedText.length > 15 
-						? selectedText.substring(0, 15) + '...' 
-						: selectedText;
-					
-					menu.addItem((item) => {
-						item
-							.setTitle(`LinkDict: Define "${displayText}"`)
-							.setIcon('book-open')
-							.onClick(() => {
-								void this.searchAndGenerateNote(selectedText.trim().toLowerCase(), editor);
-							});
-					});
-				}
+				const selection = editor.getSelection();
+				console.debug('LinkDict: Editor menu triggered. Selection:', selection);
+
+				menu.addItem((item) => {
+					item
+						.setTitle('Look up selection')
+						.setIcon('search')
+						.onClick(() => {
+							if (!selection || selection.trim() === '') {
+								new Notice('Please select a word first.');
+								return;
+							}
+							console.debug('LinkDict: Looking up word:', selection);
+							const result = this.findEntry(selection, false);
+							if (result) {
+								console.debug('LinkDict: Entry found, creating popover');
+								new DefinitionPopover(this, editor, selection, result.entry);
+							} else {
+								console.debug('LinkDict: No entry found for:', selection);
+								new Notice(`No definition found for: ${selection}`);
+							}
+						});
+				});
+
+				menu.addItem((item) => {
+					item
+						.setTitle('Create lemma note')
+						.setIcon('book-open')
+						.onClick(() => {
+							if (!selection || selection.trim() === '') {
+								new Notice('Please select a word first.');
+								return;
+							}
+							console.debug('LinkDict: Creating lemma note for:', selection);
+							void this.searchAndGenerateNote(selection, editor);
+						});
+				});
 			})
 		);
 
