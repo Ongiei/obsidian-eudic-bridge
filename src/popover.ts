@@ -172,10 +172,12 @@ export class DefinitionPopover {
 		createNoteBtn.className = 'dict-create-note-btn';
 		setIcon(createNoteBtn, 'file-plus');
 		setTooltip(createNoteBtn, 'Create Lemma Note');
-		createNoteBtn.addEventListener('click', async () => {
-			console.debug('DefinitionPopover: Button clicked, creating note');
-			await this.plugin.searchAndGenerateNote(this.originalWord);
-			this.close();
+		createNoteBtn.addEventListener('click', () => {
+			void (async () => {
+				console.debug('DefinitionPopover: Button clicked, creating note');
+				await this.plugin.searchAndGenerateNote(this.originalWord);
+				this.close();
+			})();
 		});
 		headerContainer.appendChild(createNoteBtn);
 
