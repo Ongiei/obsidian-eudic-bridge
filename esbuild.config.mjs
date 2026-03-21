@@ -1,6 +1,11 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from 'node:module';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const banner =
 `/*
@@ -10,6 +15,12 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
+const outDir = resolve(__dirname, 'vault/.obsidian/plugins/link-dict');
+const outFile = resolve(outDir, 'main.js');
+
+if (!existsSync(outDir)) {
+	mkdirSync(outDir, { recursive: true });
+}
 
 const context = await esbuild.context({
 	banner: {
@@ -37,13 +48,23 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
-	outfile: "main.js",
+	outfile,
 	minify: prod,
 });
 
+function copyRuntimeFiles() {
+	copyFileSync(resolve(__dirname, 'manifest.json'), resolve(outDir, 'manifest.json'));
+	copyFileSync(resolve(__dirname, 'styles.css'), resolve(outDir, 'styles.css'));
+	console.log(`Copied manifest.json and styles.css to ${outDir}`);
+}
+
 if (prod) {
 	await context.rebuild();
+	copyRuntimeFiles();
+	console.log(`Build complete: ${outFile}`);
 	process.exit(0);
 } else {
+	copyRuntimeFiles();
+	console.log(`Watching for changes... Output: ${outDir}`);
 	await context.watch();
 }

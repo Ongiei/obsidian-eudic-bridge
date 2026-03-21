@@ -9,6 +9,16 @@ import winkLemmatizer from 'wink-lemmatizer';
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
 
+const WORD_REGEX = /^[a-zA-Z]+(-[a-zA-Z]+)*$/;
+
+function sanitizeWord(input: string): string {
+	return input.toLowerCase().trim().replace(/[^a-zA-Z-]/g, '');
+}
+
+function isValidWord(word: string): boolean {
+	return word.length > 0 && word.length <= 50 && WORD_REGEX.test(word);
+}
+
 export default class LinkDictPlugin extends Plugin {
 	settings: LinkDictSettings;
 
@@ -38,7 +48,12 @@ export default class LinkDictPlugin extends Plugin {
 					new Notice('Please select a word to define');
 					return;
 				}
-				void this.searchAndGenerateNote(selectedText.trim().toLowerCase(), editor);
+				const word = sanitizeWord(selectedText);
+				if (!isValidWord(word)) {
+					new Notice('Please select a valid English word');
+					return;
+				}
+				void this.searchAndGenerateNote(word, editor);
 			}
 		});
 
@@ -51,13 +66,18 @@ export default class LinkDictPlugin extends Plugin {
 					new Notice('Please select a word to look up');
 					return;
 				}
-				const popover = new DefinitionPopover(this, editor, selectedText);
-				const result = await this.findEntry(selectedText, false);
+				const word = sanitizeWord(selectedText);
+				if (!isValidWord(word)) {
+					new Notice('Please select a valid English word');
+					return;
+				}
+				const popover = new DefinitionPopover(this, editor, word);
+				const result = await this.findEntry(word, false);
 				if (result) {
 					popover.setEntry(result.entry);
 				} else {
 					popover.close();
-					new Notice(`No definition found for: ${selectedText}`);
+					new Notice(`No definition found for: ${word}`);
 				}
 			}
 		});
@@ -75,7 +95,12 @@ export default class LinkDictPlugin extends Plugin {
 								new Notice('Please select a word first.');
 								return;
 							}
-							void this.searchAndGenerateNote(selection, editor);
+							const word = sanitizeWord(selection);
+							if (!isValidWord(word)) {
+								new Notice('Please select a valid English word');
+								return;
+							}
+							void this.searchAndGenerateNote(word, editor);
 						});
 				});
 
@@ -88,13 +113,18 @@ export default class LinkDictPlugin extends Plugin {
 								new Notice('Please select a word first.');
 								return;
 							}
-							const popover = new DefinitionPopover(this, editor, selection);
-							const result = await this.findEntry(selection, false);
+							const word = sanitizeWord(selection);
+							if (!isValidWord(word)) {
+								new Notice('Please select a valid English word');
+								return;
+							}
+							const popover = new DefinitionPopover(this, editor, word);
+							const result = await this.findEntry(word, false);
 							if (result) {
 								popover.setEntry(result.entry);
 							} else {
 								popover.close();
-								new Notice(`No definition found for: ${selection}`);
+								new Notice(`No definition found for: ${word}`);
 							}
 						});
 				});
@@ -105,6 +135,10 @@ export default class LinkDictPlugin extends Plugin {
 	}
 
 	onunload() {
+		const activePopover = document.querySelector('.link-dict-popover');
+		if (activePopover) {
+			activePopover.remove();
+		}
 	}
 
 	async loadSettings() {
@@ -218,18 +252,18 @@ export default class LinkDictPlugin extends Plugin {
 		let content = `# ${word}\n\n`;
 
 		if (entry.ph_en || entry.ph_am) {
-			content += '## 发音\n\n';
+			content += '## Pronunciation\n\n';
 			if (entry.ph_en) {
-				content += `- 英: \`/${entry.ph_en}/\`\n`;
+				content += `- UK: \`/${entry.ph_en}/\`\n`;
 			}
 			if (entry.ph_am) {
-				content += `- 美: \`/${entry.ph_am}/\`\n`;
+				content += `- US: \`/${entry.ph_am}/\`\n`;
 			}
 			content += '\n';
 		}
 
 		if (entry.definitions.length > 0) {
-			content += '## 释义\n\n';
+			content += '## Definitions\n\n';
 			for (const def of entry.definitions) {
 				const escapedTrans = def.trans.replace(/\[/g, '\\[');
 				if (def.pos) {
@@ -241,8 +275,8 @@ export default class LinkDictPlugin extends Plugin {
 			content += '\n';
 		}
 
-		if (entry.webTrans && entry.webTrans.length > 0) {
-			content += '## 网络释义\n\n';
+		if (this.settings.showWebTrans && entry.webTrans && entry.webTrans.length > 0) {
+			content += '## Web Translations\n\n';
 			for (const item of entry.webTrans) {
 				const numberedValues = item.value.map((v, i) => `${i + 1}. ${v}`).join(' ');
 				content += `- **${item.key}**: ${numberedValues}\n`;
@@ -250,8 +284,8 @@ export default class LinkDictPlugin extends Plugin {
 			content += '\n';
 		}
 
-		if (entry.bilingualExamples && entry.bilingualExamples.length > 0) {
-			content += '## 例句\n\n';
+		if (this.settings.showExamples && entry.bilingualExamples && entry.bilingualExamples.length > 0) {
+			content += '## Examples\n\n';
 			for (const example of entry.bilingualExamples) {
 				content += `- ${example.eng}\n`;
 				content += `  - ${example.chn}\n`;
@@ -260,7 +294,7 @@ export default class LinkDictPlugin extends Plugin {
 		}
 
 		if (entry.exchange.length > 0) {
-			content += '## 变形\n\n';
+			content += '## Word Forms\n\n';
 			for (const item of entry.exchange) {
 				content += `- ${item.name}: ${item.value}\n`;
 			}

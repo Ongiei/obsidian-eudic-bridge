@@ -4,11 +4,15 @@ import LinkDictPlugin from "./main";
 export interface LinkDictSettings {
 	folderPath: string;
 	saveTags: boolean;
+	showWebTrans: boolean;
+	showExamples: boolean;
 }
 
 export const DEFAULT_SETTINGS: LinkDictSettings = {
 	folderPath: 'LinkDict',
-	saveTags: true
+	saveTags: true,
+	showWebTrans: true,
+	showExamples: true
 }
 
 export class LinkDictSettingTab extends PluginSettingTab {
@@ -49,6 +53,32 @@ export class LinkDictSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		containerEl.createEl('h3', { text: 'Display Options' });
+
+		new Setting(containerEl)
+			.setName('Show web translations')
+			.setDesc('Display web translations in sidebar view and generated notes')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.showWebTrans)
+					.onChange(async (value) => {
+						this.plugin.settings.showWebTrans = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('Show bilingual examples')
+			.setDesc('Display example sentences with translations')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.showExamples)
+					.onChange(async (value) => {
+						this.plugin.settings.showExamples = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 }
 
@@ -72,7 +102,7 @@ class FolderSuggest extends AbstractInputSuggest<string> {
 		});
 
 		return folders.filter((folder: string) =>
-			folder.toLowerCase().contains(lowerCaseInputStr)
+			folder.toLowerCase().includes(lowerCaseInputStr)
 		);
 	}
 

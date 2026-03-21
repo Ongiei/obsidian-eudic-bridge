@@ -3,8 +3,9 @@ import LinkDictPlugin from './main';
 import {DictEntry, EditorWithCM} from './types';
 
 export class DefinitionPopover {
-	private overlay: HTMLElement;
-	private entry: DictEntry | null;
+	private overlay: HTMLElement | null = null;
+	private entry: DictEntry | null = null;
+	private abortController: AbortController | null = null;
 
 	constructor(
 		private plugin: LinkDictPlugin,
@@ -74,9 +75,15 @@ export class DefinitionPopover {
 
 		this.renderContent();
 
+		this.abortController = new AbortController();
 		setTimeout(() => {
-			this.overlay.classList.add('active');
-			window.addEventListener('mousedown', this.onWindowClick, { capture: true });
+			if (this.overlay) {
+				this.overlay.classList.add('active');
+				window.addEventListener('mousedown', this.onWindowClick, { 
+					capture: true, 
+					signal: this.abortController!.signal 
+				});
+			}
 		}, 10);
 	}
 
@@ -90,9 +97,19 @@ export class DefinitionPopover {
 		if (existing) {
 			existing.remove();
 		}
+		this.cleanupListeners();
+	}
+
+	private cleanupListeners() {
+		if (this.abortController) {
+			this.abortController.abort();
+			this.abortController = null;
+		}
 	}
 
 	private renderContent() {
+		if (!this.overlay) return;
+
 		this.overlay.innerHTML = '';
 
 		if (!this.entry) {
@@ -124,7 +141,7 @@ export class DefinitionPopover {
 			if (this.entry.ph_en) {
 				const ukPhoneticBtn = document.createElement('div');
 				ukPhoneticBtn.className = 'dict-phonetic-btn';
-				ukPhoneticBtn.textContent = `英 /${this.entry.ph_en}/ 🔊`;
+				ukPhoneticBtn.textContent = `UK /${this.entry.ph_en}/`;
 				if (this.entry.mp3_en) {
 					ukPhoneticBtn.addEventListener('click', () => {
 						void new Audio(this.entry!.mp3_en).play();
@@ -136,7 +153,7 @@ export class DefinitionPopover {
 			if (this.entry.ph_am) {
 				const usPhoneticBtn = document.createElement('div');
 				usPhoneticBtn.className = 'dict-phonetic-btn';
-				usPhoneticBtn.textContent = `美 /${this.entry.ph_am}/ 🔊`;
+				usPhoneticBtn.textContent = `US /${this.entry.ph_am}/`;
 				if (this.entry.mp3_am) {
 					usPhoneticBtn.addEventListener('click', () => {
 						void new Audio(this.entry!.mp3_am).play();
@@ -168,7 +185,7 @@ export class DefinitionPopover {
 		if (this.entry.definitions.length > 0) {
 			const definitionsList = document.createElement('div');
 			definitionsList.className = 'popover-definitions-list';
-			this.entry.definitions.forEach((def: { pos: string; trans: string }) => {
+			this.entry.definitions.forEach((def) => {
 				const defRow = document.createElement('div');
 				defRow.className = 'popover-def-row';
 				if (def.pos) {
@@ -193,7 +210,7 @@ export class DefinitionPopover {
 			if (this.entry.tags.length > 0) {
 				const tagsContainer = document.createElement('div');
 				tagsContainer.className = 'popover-tags-container';
-				this.entry.tags.forEach((tag: string) => {
+				this.entry.tags.forEach((tag) => {
 					const tagEl = document.createElement('span');
 					tagEl.className = 'popover-tag-exam';
 					tagEl.textContent = tag;
@@ -203,8 +220,9 @@ export class DefinitionPopover {
 			}
 
 			if (this.entry.exchange.length > 0) {
-				const formsList = footer.createEl('div', { cls: 'popover-exchange-list' });
-				this.entry.exchange.forEach((item: { name: string; value: string }) => {
+				const formsList = document.createElement('div');
+				formsList.className = 'popover-exchange-list';
+				this.entry.exchange.forEach((item) => {
 					const formItem = document.createElement('span');
 					formItem.className = 'popover-tag-form';
 					const label = document.createElement('span');
@@ -225,15 +243,16 @@ export class DefinitionPopover {
 	}
 
 	private onWindowClick = (event: MouseEvent) => {
-		if (!this.overlay.contains(event.target as Node)) {
+		if (this.overlay && !this.overlay.contains(event.target as Node)) {
 			this.close();
 		}
 	};
 
 	public close() {
+		this.cleanupListeners();
 		if (this.overlay) {
 			this.overlay.remove();
+			this.overlay = null;
 		}
-		window.removeEventListener('mousedown', this.onWindowClick, { capture: true });
 	}
 }
