@@ -5,7 +5,7 @@ import {DefinitionPopover} from "./popover";
 import {YoudaoService} from "./youdao";
 import {DictEntry} from "./types";
 
-import winkLemmatizer from 'wink-lemmatizer';
+import * as winkLemmatizer from 'wink-lemmatizer';
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
 
@@ -50,7 +50,7 @@ export default class LinkDictPlugin extends Plugin {
 				}
 				const word = sanitizeWord(selectedText);
 				if (!isValidWord(word)) {
-					new Notice('please select a valid English word');
+					new Notice('Please select a valid English word');
 					return;
 				}
 				void this.searchAndGenerateNote(word, editor);
@@ -68,7 +68,7 @@ export default class LinkDictPlugin extends Plugin {
 				}
 				const word = sanitizeWord(selectedText);
 				if (!isValidWord(word)) {
-					new Notice('please select a valid English word');
+					new Notice('Please select a valid English word');
 					return;
 				}
 				const popover = new DefinitionPopover(this, editor, word);
@@ -97,7 +97,7 @@ export default class LinkDictPlugin extends Plugin {
 							}
 							const word = sanitizeWord(selection);
 							if (!isValidWord(word)) {
-								new Notice('please select a valid English word');
+								new Notice('Please select a valid English word');
 								return;
 							}
 							void this.searchAndGenerateNote(word, editor);
@@ -115,7 +115,7 @@ export default class LinkDictPlugin extends Plugin {
 							}
 							const word = sanitizeWord(selection);
 							if (!isValidWord(word)) {
-								new Notice('please select a valid English word');
+								new Notice('Please select a valid English word');
 								return;
 							}
 							const popover = new DefinitionPopover(this, editor, word);

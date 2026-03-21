@@ -1,10 +1,7 @@
 declare module 'wink-lemmatizer' {
-	const winkLemmatizer: {
-		noun(word: string): string;
-		verb(word: string): string;
-		adjective(word: string): string;
-	};
-	export default winkLemmatizer;
+	export function noun(word: string): string;
+	export function verb(word: string): string;
+	export function adjective(word: string): string;
 }
 
 export interface DictEntry {
