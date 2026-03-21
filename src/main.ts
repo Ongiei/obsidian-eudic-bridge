@@ -1,4 +1,4 @@
-import {Editor, MarkdownView, Menu, Notice, Plugin, TFile} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf} from 'obsidian';
 import {DEFAULT_SETTINGS, LinkDictSettings, LinkDictSettingTab} from "./settings";
 import {DictionaryView} from "./view";
 import {DefinitionPopover} from "./popover";
@@ -340,7 +340,7 @@ export default class LinkDictPlugin extends Plugin {
 		const { workspace } = this.app;
 		const leaves = workspace.getLeavesOfType(VIEW_TYPE_LINK_DICT);
 
-		let leaf = leaves[0];
+		let leaf: WorkspaceLeaf | null = leaves[0] ?? null;
 		if (!leaf) {
 			leaf = workspace.getRightLeaf(false);
 			if (leaf) {

@@ -21,7 +21,7 @@ export class DefinitionPopover {
 		this.removeExistingPopover();
 
 		const cursorFrom = this.editor.getCursor('from');
-		const cm = (this.editor as EditorWithCM).cm;
+		const cm = (this.editor as unknown as EditorWithCM).cm;
 		const pos = this.editor.posToOffset(cursorFrom);
 		const coords = cm?.coordsAtPos(pos);
 
