@@ -1,7 +1,6 @@
 import {requestUrl} from 'obsidian';
 import {DictEntry} from './types';
 
-const REQUEST_TIMEOUT_MS = 30000;
 const ALLOWED_AUDIO_DOMAINS = ['dict.youdao.com'];
 
 interface WebTranslationItem {
