@@ -63,7 +63,7 @@ export class YoudaoService {
 				return null;
 			}
 
-			const data = response.json as YoudaoJsonResponse;
+			const data = response.json as unknown as YoudaoJsonResponse;
 			return this.parseJson(data, word);
 		} catch (error) {
 			console.error('Youdao JSON API Error:', error);
@@ -81,25 +81,25 @@ export class YoudaoService {
 			return null;
 		}
 
-		const ph_en = entryData.ukphone ?? "";
-		const ph_am = entryData.usphone ?? "";
+		const ph_uk = entryData.ukphone ?? "";
+		const ph_us = entryData.usphone ?? "";
 
-		let mp3_en = "";
-		let mp3_am = "";
+		let audio_uk = "";
+		let audio_us = "";
 		if (entryData.ukspeech) {
-			mp3_en = entryData.ukspeech.startsWith('http') 
+			audio_uk = entryData.ukspeech.startsWith('http') 
 				? entryData.ukspeech 
 				: `https://dict.youdao.com/dictvoice?audio=${entryData.ukspeech}`;
 		}
 		if (entryData.usspeech) {
-			mp3_am = entryData.usspeech.startsWith('http') 
+			audio_us = entryData.usspeech.startsWith('http') 
 				? entryData.usspeech 
 				: `https://dict.youdao.com/dictvoice?audio=${entryData.usspeech}`;
 		}
 
 		const definitions: { pos: string; trans: string }[] = [];
 		if (entryData.trs) {
-			entryData.trs.forEach(tr => {
+			for (const tr of entryData.trs) {
 				try {
 					if (tr?.tr?.[0]?.l?.i?.[0]) {
 						let pos = tr.tr[0].pos ?? "";
@@ -118,29 +118,29 @@ export class YoudaoService {
 				} catch (e) {
 					console.warn('Error parsing definition:', e);
 				}
-			});
+			}
 		}
 
-		const tags = data.ec.exam_type ?? [];
+		const tags: string[] = data.ec.exam_type ?? [];
 
 		const exchange: { name: string; value: string }[] = [];
 		if (entryData.wfs) {
-			entryData.wfs.forEach(item => {
+			for (const item of entryData.wfs) {
 				if (item?.wf?.name && item?.wf?.value) {
 					exchange.push({
 						name: item.wf.name,
 						value: item.wf.value
 					});
 				}
-			});
+			}
 		}
 
 		const entry: DictEntry = {
 			word: originalWord,
-			ph_en,
-			ph_am,
-			mp3_en,
-			mp3_am,
+			ph_uk,
+			ph_us,
+			audio_uk,
+			audio_us,
 			definitions,
 			tags,
 			exchange
@@ -150,32 +150,47 @@ export class YoudaoService {
 			const webTransRaw = data.web_trans?.['web-translation'];
 			if (webTransRaw && Array.isArray(webTransRaw)) {
 				const queryLower = originalWord.toLowerCase().trim();
-				entry.webTrans = webTransRaw
-					.map((item: WebTranslationItem) => ({
-						key: item['@key'] ?? item.key ?? '',
-						value: item.trans?.map((t) => t?.value).filter((v): v is string => Boolean(v)) ?? []
-					}))
-					.filter(item => {
-						const itemKey = item.key?.toLowerCase().trim();
-						return itemKey === queryLower && item.value.length > 0;
-					});
+				const webTrans: { key: string; value: string[] }[] = [];
+				for (const item of webTransRaw) {
+					const key = item['@key'] ?? item.key ?? '';
+					const values: string[] = [];
+					if (item.trans) {
+						for (const t of item.trans) {
+							if (t.value) {
+								values.push(t.value);
+							}
+						}
+					}
+					if (key.toLowerCase().trim() === queryLower && values.length > 0) {
+						webTrans.push({ key, value: values });
+					}
+				}
+				if (webTrans.length > 0) {
+					entry.webTrans = webTrans;
+				}
 			}
 
 			const bilingualRaw = data.blng_sents_part?.['sentence-pair'];
 			if (bilingualRaw && Array.isArray(bilingualRaw)) {
-				entry.bilingualExamples = bilingualRaw
-					.slice(0, 5)
-					.map((item: SentencePair) => ({
-						eng: item.sentence ?? '',
-						chn: item['sentence-translation'] ?? ''
-					}))
-					.filter(item => item.eng && item.chn);
+				const examples: { eng: string; chn: string }[] = [];
+				for (let i = 0; i < Math.min(bilingualRaw.length, 5); i++) {
+					const item = bilingualRaw[i];
+					if (!item) continue;
+					const eng = item.sentence ?? '';
+					const chn = item['sentence-translation'] ?? '';
+					if (eng && chn) {
+						examples.push({ eng, chn });
+					}
+				}
+				if (examples.length > 0) {
+					entry.bilingualExamples = examples;
+				}
 			}
 		} catch (error) {
 			console.error('Extended info parsing failed:', error);
 		}
 
-		if (definitions.length > 0 || ph_en || ph_am) {
+		if (definitions.length > 0 || ph_uk || ph_us) {
 			return entry;
 		}
 

@@ -6,10 +6,10 @@ declare module 'wink-lemmatizer' {
 
 export interface DictEntry {
 	word: string;
-	ph_en: string;
-	ph_am: string;
-	mp3_en: string;
-	mp3_am: string;
+	ph_uk: string;
+	ph_us: string;
+	audio_uk: string;
+	audio_us: string;
 	definitions: { pos: string; trans: string }[];
 	tags: string[];
 	exchange: { name: string; value: string }[];

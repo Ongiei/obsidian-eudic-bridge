@@ -1,11 +1,14 @@
 import {ItemView, WorkspaceLeaf, setIcon, setTooltip} from 'obsidian';
 import LinkDictPlugin from './main';
 import {DictEntry} from './types';
+import {t} from './i18n';
 
 export class DictionaryView extends ItemView {
 	plugin: LinkDictPlugin;
 	searchInput: HTMLInputElement;
 	resultContainer: HTMLElement;
+	private currentWord: string = '';
+	private currentEntry: DictEntry | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: LinkDictPlugin) {
 		super(leaf);
@@ -33,23 +36,29 @@ export class DictionaryView extends ItemView {
 
 		const searchBarEl = contentEl.createEl('div', { cls: 'link-dict-search-box' });
 
-		this.searchInput = searchBarEl.createEl('input', {
+		const inputWrapper = searchBarEl.createEl('div', { cls: 'link-dict-input-wrapper' });
+
+		this.searchInput = inputWrapper.createEl('input', {
 			type: 'text',
 			cls: 'link-dict-search-input',
-			attr: { placeholder: 'Input word...' }
+			attr: { placeholder: t('ui_inputWord') }
 		});
 
-		const searchButton = searchBarEl.createEl('button', {
-			cls: 'link-dict-search-btn'
+		const searchButton = inputWrapper.createEl('button', {
+			cls: 'link-dict-search-btn-inside'
 		});
 		setIcon(searchButton, 'search');
+		setTooltip(searchButton, t('ui_search'));
+		searchButton.addEventListener('click', () => {
+			void this.performSearch();
+		});
 
 		const createNoteButton = searchBarEl.createEl('button', {
-			cls: 'link-dict-search-btn',
-			attr: { 'aria-label': 'Create lemma note' }
+			cls: 'link-dict-action-btn',
+			attr: { 'aria-label': t('ui_createLemmaNote') }
 		});
 		setIcon(createNoteButton, 'file-plus');
-		setTooltip(createNoteButton, 'Create lemma note');
+		setTooltip(createNoteButton, t('ui_createLemmaNote'));
 		createNoteButton.addEventListener('click', () => {
 			const word = this.searchInput.value.trim();
 			if (word) {
@@ -57,16 +66,27 @@ export class DictionaryView extends ItemView {
 			}
 		});
 
+		if (this.plugin.settings.eudicToken) {
+			const addToEudicButton = searchBarEl.createEl('button', {
+				cls: 'link-dict-action-btn',
+				attr: { 'aria-label': t('ui_addToEudic') }
+			});
+			setIcon(addToEudicButton, 'plus-circle');
+			setTooltip(addToEudicButton, t('ui_addToEudic'));
+			addToEudicButton.addEventListener('click', () => {
+				const word = this.searchInput.value.trim();
+				if (word) {
+					void this.plugin.addToEudic(word);
+				}
+			});
+		}
+
 		this.resultContainer = contentEl.createEl('div', { cls: 'dict-result-container' });
 
 		this.searchInput.addEventListener('keydown', (event) => {
 			if (event.key === 'Enter') {
 				void this.performSearch();
 			}
-		});
-
-		searchButton.addEventListener('click', () => {
-			void this.performSearch();
 		});
 	}
 
@@ -80,7 +100,7 @@ export class DictionaryView extends ItemView {
 			this.resultContainer.empty();
 			const message = this.resultContainer.createEl('p');
 			message.addClass('link-dict-message');
-			message.setText('Please enter a word to search.');
+			message.setText(t('ui_pleaseEnterWord'));
 			return;
 		}
 
@@ -91,16 +111,17 @@ export class DictionaryView extends ItemView {
 			const message = this.resultContainer.createEl('p');
 			message.addClass('link-dict-message');
 			const textSpan = message.createEl('span');
-			textSpan.setText('No definition found for: ');
+			textSpan.setText(`${t('ui_noDefinitionFound')} `);
 			const strongSpan = message.createEl('strong');
 			strongSpan.setText(word);
 			return;
 		}
 
 		const { entry, word: lemma } = result;
+		this.currentWord = lemma;
+		this.currentEntry = entry;
 
 		this.resultContainer.empty();
-
 		this.renderEntry(entry, lemma);
 	}
 
@@ -114,26 +135,26 @@ export class DictionaryView extends ItemView {
 		const title = headerLeft.createEl('h1', { cls: 'dict-title' });
 		title.textContent = word;
 
-		if (entry.ph_en || entry.ph_am) {
+		if (entry.ph_uk || entry.ph_us) {
 			const phoneticContainer = headerLeft.createEl('div', { cls: 'dict-phonetic-container' });
 
-			if (entry.ph_en) {
+			if (entry.ph_uk) {
 				const ukPhoneticBtn = phoneticContainer.createEl('div', { cls: 'dict-phonetic-btn' });
-				ukPhoneticBtn.textContent = `UK /${entry.ph_en}/`;
-				if (entry.mp3_en) {
+				ukPhoneticBtn.textContent = `${t('view_uk')} /${entry.ph_uk}/`;
+				if (entry.audio_uk) {
 					ukPhoneticBtn.addEventListener('click', () => {
-						void new Audio(entry.mp3_en).play();
+						void new Audio(entry.audio_uk).play();
 					});
 				}
 				phoneticContainer.appendChild(ukPhoneticBtn);
 			}
 
-			if (entry.ph_am) {
+			if (entry.ph_us) {
 				const usPhoneticBtn = phoneticContainer.createEl('div', { cls: 'dict-phonetic-btn' });
-				usPhoneticBtn.textContent = `US /${entry.ph_am}/`;
-				if (entry.mp3_am) {
+				usPhoneticBtn.textContent = `${t('view_us')} /${entry.ph_us}/`;
+				if (entry.audio_us) {
 					usPhoneticBtn.addEventListener('click', () => {
-						void new Audio(entry.mp3_am).play();
+						void new Audio(entry.audio_us).play();
 					});
 				}
 				phoneticContainer.appendChild(usPhoneticBtn);
@@ -182,7 +203,7 @@ export class DictionaryView extends ItemView {
 	}
 
 	private renderExtendedData(container: HTMLElement, entry: DictEntry) {
-		this.renderSection(container, 'Web Translations', 'dict-web-trans', this.plugin.settings.showWebTrans, entry.webTrans, (details) => {
+		this.renderSection(container, t('view_webTranslations'), 'dict-web-trans', this.plugin.settings.showWebTrans, entry.webTrans, (details) => {
 			const webList = details.createEl('ul', { cls: 'dict-web-list' });
 			entry.webTrans!.forEach(item => {
 				const li = webList.createEl('li', { cls: 'dict-web-item' });
@@ -193,7 +214,7 @@ export class DictionaryView extends ItemView {
 			});
 		});
 
-		this.renderSection(container, 'Examples', 'dict-examples', this.plugin.settings.showExamples, entry.bilingualExamples, (details) => {
+		this.renderSection(container, t('view_examples'), 'dict-examples', this.plugin.settings.showExamples, entry.bilingualExamples, (details) => {
 			const examplesList = details.createEl('div', { cls: 'dict-examples-list' });
 			entry.bilingualExamples!.forEach(example => {
 				const exampleRow = examplesList.createEl('div', { cls: 'dict-example-row' });

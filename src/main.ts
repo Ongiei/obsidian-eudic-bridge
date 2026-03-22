@@ -4,8 +4,13 @@ import {DictionaryView} from "./view";
 import {DefinitionPopover} from "./popover";
 import {YoudaoService} from "./youdao";
 import {DictEntry} from "./types";
-
-import * as winkLemmatizer from 'wink-lemmatizer';
+import {getLemma} from "./lemmatizer";
+import {EudicService} from "./eudic";
+import {SyncService} from "./sync";
+import {LedgerService} from "./ledger";
+import {AutoLinkService} from "./auto-link";
+import {BatchUpdateService} from "./batch-update";
+import {t, detectLanguage, setLanguage} from "./i18n";
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
 
@@ -19,21 +24,113 @@ function isValidWord(word: string): boolean {
 	return word.length > 0 && word.length <= 50 && WORD_REGEX.test(word);
 }
 
+function escapeYamlString(str: string): string {
+	if (!str) return str;
+	if (str.includes(':') || str.includes("'") || str.includes('"') || str.includes('\n') || str.includes('#')) {
+		return `'${str.replace(/'/g, "''")}'`;
+	}
+	return str;
+}
+
 export default class LinkDictPlugin extends Plugin {
 	settings: LinkDictSettings;
+	private eudicService: EudicService | null = null;
+	private syncService: SyncService | null = null;
+	private ledgerService: LedgerService | null = null;
+	private autoLinkService: AutoLinkService | null = null;
+	private batchUpdateService: BatchUpdateService | null = null;
+	private syncTimer: number | null = null;
+	private syncTimerRegistered: boolean = false;
+	private startupSyncTimeout: number | null = null;
+	private syncRibbonIcon: HTMLElement | null = null;
+	private batchRibbonIcon: HTMLElement | null = null;
 
 	async onload() {
 		await this.loadSettings();
+		this.initLanguage();
+
+		this.ledgerService = new LedgerService(this.app, {
+			loadData: () => this.loadData(),
+			saveData: (data) => this.saveData(data),
+		});
+		await this.ledgerService.load();
 
 		this.registerView(VIEW_TYPE_LINK_DICT, (leaf) => new DictionaryView(leaf, this));
 
-		this.addRibbonIcon('book-open', 'Open dictionary view', () => {
+		this.addRibbonIcon('book-open', t('commands_openDictionaryView'), () => {
 			void this.activateView();
 		});
 
+		this.autoLinkService = new AutoLinkService(this.app, this.settings, this.ledgerService);
+
+		this.batchUpdateService = new BatchUpdateService(this.app, this.settings);
+
+		this.initEudicServices();
+		this.updateRibbonIcons();
+
+		this.registerCommands();
+		this.registerMenus();
+		this.registerEventHandlers();
+		this.registerProtocolHandler();
+		this.addSettingTab(new LinkDictSettingTab(this.app, this));
+
+		this.initSyncServices();
+	}
+
+	onunload() {
+		const activePopover = document.querySelector('.link-dict-popover');
+		if (activePopover) {
+			activePopover.remove();
+		}
+		this.clearSyncTimer();
+		this.clearStartupSyncTimeout();
+	}
+
+	private initLanguage(): void {
+		if (this.settings.language === 'auto') {
+			setLanguage(detectLanguage());
+		} else {
+			setLanguage(this.settings.language as 'en' | 'zh');
+		}
+	}
+
+	private initEudicServices(): void {
+		if (!this.settings.eudicToken) return;
+
+		this.eudicService = new EudicService(this.settings.eudicToken);
+		this.syncService = new SyncService(
+			this.app,
+			this.settings,
+			this.eudicService,
+			this.ledgerService!
+		);
+	}
+
+	updateRibbonIcons(): void {
+		if (this.syncRibbonIcon) {
+			this.syncRibbonIcon.remove();
+			this.syncRibbonIcon = null;
+		}
+		if (this.batchRibbonIcon) {
+			this.batchRibbonIcon.remove();
+			this.batchRibbonIcon = null;
+		}
+
+		if (this.settings.eudicToken && this.settings.enableSync) {
+			this.syncRibbonIcon = this.addRibbonIcon('refresh-cw', t('commands_syncNow'), () => {
+				void this.performSync();
+			});
+		}
+
+		this.batchRibbonIcon = this.addRibbonIcon('layers', t('commands_batchUpdate'), () => {
+			void this.performBatchUpdate();
+		});
+	}
+
+	private registerCommands(): void {
 		this.addCommand({
 			id: 'open-dictionary-view',
-			name: 'Open dictionary view',
+			name: t('commands_openDictionaryView'),
 			callback: () => {
 				void this.activateView();
 			}
@@ -41,16 +138,16 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'define-selected-word',
-			name: 'Create lemma note',
+			name: t('commands_createLemmaNote'),
 			editorCallback: (editor: Editor, _view: MarkdownView) => {
 				const selectedText = editor.getSelection();
 				if (!selectedText || selectedText.trim() === '') {
-					new Notice('Please select a word to define');
+					new Notice(t('notice_pleaseSelectWord'));
 					return;
 				}
 				const word = sanitizeWord(selectedText);
 				if (!isValidWord(word)) {
-					new Notice('Please select a valid English word');
+					new Notice(t('notice_pleaseSelectValidWord'));
 					return;
 				}
 				void this.searchAndGenerateNote(word, editor);
@@ -59,16 +156,16 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'lookup-selection',
-			name: 'Look up selection',
+			name: t('commands_lookUpSelection'),
 			editorCallback: async (editor: Editor, _view: MarkdownView) => {
 				const selectedText = editor.getSelection();
 				if (!selectedText || selectedText.trim() === '') {
-					new Notice('Please select a word to look up');
+					new Notice(t('notice_pleaseSelectWord'));
 					return;
 				}
 				const word = sanitizeWord(selectedText);
 				if (!isValidWord(word)) {
-					new Notice('Please select a valid English word');
+					new Notice(t('notice_pleaseSelectValidWord'));
 					return;
 				}
 				const popover = new DefinitionPopover(this, editor, word);
@@ -77,27 +174,53 @@ export default class LinkDictPlugin extends Plugin {
 					popover.setEntry(result.entry);
 				} else {
 					popover.close();
-					new Notice(`No definition found for: ${word}`);
+					new Notice(`${t('ui_noDefinitionFound')} ${word}`);
 				}
 			}
 		});
 
+		this.addCommand({
+			id: 'sync-now',
+			name: t('commands_syncNow'),
+			callback: () => {
+				void this.performSync();
+			}
+		});
+
+		this.addCommand({
+			id: 'auto-link-document',
+			name: t('commands_autoLinkDocument'),
+			editorCallback: (editor: Editor) => {
+				void this.autoLinkDocument(editor);
+			}
+		});
+
+		this.addCommand({
+			id: 'batch-update-definitions',
+			name: t('commands_batchUpdate'),
+			callback: () => {
+				void this.performBatchUpdate();
+			}
+		});
+	}
+
+	private registerMenus(): void {
 		this.registerEvent(
-			this.app.workspace.on('editor-menu', async (menu: Menu, editor: Editor, _view: MarkdownView) => {
+			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor, _view: MarkdownView) => {
 				const selection = editor.getSelection();
 
 				menu.addItem((item) => {
 					item
-						.setTitle('Create lemma note')
+						.setTitle(t('menu_createLemmaNote'))
 						.setIcon('book-open')
 						.onClick(() => {
 							if (!selection || selection.trim() === '') {
-								new Notice('Please select a word first.');
+								new Notice(t('notice_pleaseSelectWord'));
 								return;
 							}
 							const word = sanitizeWord(selection);
 							if (!isValidWord(word)) {
-								new Notice('Please select a valid English word');
+								new Notice(t('notice_pleaseSelectValidWord'));
 								return;
 							}
 							void this.searchAndGenerateNote(word, editor);
@@ -106,16 +229,16 @@ export default class LinkDictPlugin extends Plugin {
 
 				menu.addItem((item) => {
 					item
-						.setTitle('Look up selection')
+						.setTitle(t('menu_lookUpSelection'))
 						.setIcon('search')
 						.onClick(async () => {
 							if (!selection || selection.trim() === '') {
-								new Notice('Please select a word first.');
+								new Notice(t('notice_pleaseSelectWord'));
 								return;
 							}
 							const word = sanitizeWord(selection);
 							if (!isValidWord(word)) {
-								new Notice('Please select a valid English word');
+								new Notice(t('notice_pleaseSelectValidWord'));
 								return;
 							}
 							const popover = new DefinitionPopover(this, editor, word);
@@ -124,25 +247,154 @@ export default class LinkDictPlugin extends Plugin {
 								popover.setEntry(result.entry);
 							} else {
 								popover.close();
-								new Notice(`No definition found for: ${word}`);
+								new Notice(`${t('ui_noDefinitionFound')} ${word}`);
 							}
 						});
 				});
 			})
 		);
-
-		this.addSettingTab(new LinkDictSettingTab(this.app, this));
 	}
 
-	onunload() {
-		const activePopover = document.querySelector('.link-dict-popover');
-		if (activePopover) {
-			activePopover.remove();
+	private registerEventHandlers(): void {
+		this.registerEvent(
+			this.app.vault.on('create', (file) => {
+				if (file instanceof TFile && file.extension === 'md') {
+					void this.handleFileCreated(file);
+				}
+			})
+		);
+
+		this.registerEvent(
+			this.app.vault.on('delete', (file) => {
+				if (file instanceof TFile && file.extension === 'md') {
+					void this.handleFileDeleted(file);
+				}
+			})
+		);
+	}
+
+	private registerProtocolHandler(): void {
+		this.registerObsidianProtocolHandler('linkdict', async (params) => {
+			const action = params.action;
+			const word = params.word;
+
+			if (action === 'update' && word) {
+				await this.updateWordFromProtocol(word);
+			}
+		});
+	}
+
+	private async updateWordFromProtocol(word: string): Promise<void> {
+		if (!this.batchUpdateService) {
+			this.batchUpdateService = new BatchUpdateService(this.app, this.settings);
+		}
+
+		const success = await this.batchUpdateService.updateSingleWord(word);
+		if (success) {
+			new Notice(t('notice_updateSuccess', { word }));
+		} else {
+			new Notice(t('notice_updateFailed', { word }));
 		}
 	}
 
+	private initSyncServices(): void {
+		if (!this.settings.eudicToken || !this.settings.enableSync) return;
+
+		if (this.settings.syncOnStartup) {
+			this.scheduleStartupSync();
+		}
+
+		if (this.settings.autoSync) {
+			this.startSyncTimer();
+		}
+	}
+
+	private scheduleStartupSync(): void {
+		this.clearStartupSyncTimeout();
+		const delayMs = Math.max(0, this.settings.startupDelay) * 1000;
+		this.startupSyncTimeout = window.setTimeout(() => {
+			void this.performSync();
+		}, delayMs);
+	}
+
+	private clearStartupSyncTimeout(): void {
+		if (this.startupSyncTimeout !== null) {
+			window.clearTimeout(this.startupSyncTimeout);
+			this.startupSyncTimeout = null;
+		}
+	}
+
+	restartSyncTimer(): void {
+		this.clearSyncTimer();
+		this.updateRibbonIcons();
+		if (this.settings.enableSync && this.settings.autoSync) {
+			this.startSyncTimer();
+		}
+	}
+
+	private startSyncTimer(): void {
+		const intervalMs = Math.max(5, this.settings.syncInterval) * 60 * 1000;
+		this.syncTimer = window.setInterval(() => {
+			void this.performSync();
+		}, intervalMs);
+		if (!this.syncTimerRegistered) {
+			this.registerInterval(this.syncTimer);
+			this.syncTimerRegistered = true;
+		}
+	}
+
+	private clearSyncTimer(): void {
+		if (this.syncTimer !== null) {
+			window.clearInterval(this.syncTimer);
+			this.syncTimer = null;
+		}
+	}
+
+	async performSync(): Promise<void> {
+		if (!this.syncService || !this.eudicService) {
+			new Notice(t('notice_noTokenConfigured'));
+			return;
+		}
+
+		this.syncService = new SyncService(
+			this.app,
+			this.settings,
+			this.eudicService,
+			this.ledgerService!
+		);
+		await this.syncService.sync(this.settings.syncDirection);
+	}
+
+	async performBatchUpdate(): Promise<void> {
+		if (!this.batchUpdateService) {
+			this.batchUpdateService = new BatchUpdateService(this.app, this.settings);
+		}
+
+		await this.batchUpdateService.batchUpdate();
+	}
+
+	async autoLinkDocument(editor: Editor): Promise<void> {
+		if (!this.autoLinkService) {
+			this.autoLinkService = new AutoLinkService(this.app, this.settings, this.ledgerService!);
+		}
+
+		this.autoLinkService.invalidateCache();
+		const count = await this.autoLinkService.autoLinkCurrentDocument(editor);
+		new Notice(t('notice_autoLinkCompleted', { count }));
+	}
+
+	private async handleFileCreated(file: TFile): Promise<void> {
+		if (!this.syncService) return;
+		await this.syncService.handleFileCreated(file);
+	}
+
+	private async handleFileDeleted(file: TFile): Promise<void> {
+		if (!this.syncService) return;
+		await this.syncService.handleFileDeleted(file);
+	}
+
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData();
+		const loaded: unknown = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded as Partial<LinkDictSettings>);
 	}
 
@@ -150,31 +402,33 @@ export default class LinkDictPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
-	public async findEntry(word: string, useLemmatizer: boolean = true): Promise<{ entry: DictEntry; word: string } | null> {
+	async addToEudic(word: string): Promise<boolean> {
+		if (!this.eudicService) {
+			new Notice(t('notice_pleaseConfigureToken'));
+			return false;
+		}
+
+		const listId = this.settings.eudicDefaultListId || '0';
+
+		try {
+			await this.eudicService.addWords(listId, [word]);
+			new Notice(t('notice_addedToEudic', { word, message: '' }));
+			return true;
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			new Notice(t('notice_failedToAddEudic', { error: errorMessage }));
+			return false;
+		}
+	}
+
+	public async findEntry(word: string, useLemmatizerFlag: boolean = true): Promise<{ entry: DictEntry; word: string } | null> {
 		const searchWord = word.toLowerCase().trim();
 
 		if (!searchWord) {
 			return null;
 		}
 
-		let lookupWord = searchWord;
-
-		if (useLemmatizer) {
-			const nounLemma: string = winkLemmatizer.noun(searchWord);
-			if (nounLemma !== searchWord) {
-				lookupWord = nounLemma;
-			}
-
-			const verbLemma: string = winkLemmatizer.verb(searchWord);
-			if (verbLemma !== searchWord && verbLemma !== nounLemma) {
-				lookupWord = verbLemma;
-			}
-
-			const adjectiveLemma: string = winkLemmatizer.adjective(searchWord);
-			if (adjectiveLemma !== searchWord && adjectiveLemma !== nounLemma && adjectiveLemma !== verbLemma) {
-				lookupWord = adjectiveLemma;
-			}
-		}
+		const lookupWord = useLemmatizerFlag ? getLemma(searchWord) : searchWord;
 
 		const entry = await YoudaoService.lookup(lookupWord);
 
@@ -189,13 +443,20 @@ export default class LinkDictPlugin extends Plugin {
 		const result = await this.findEntry(searchWord, true);
 
 		if (!result) {
-			new Notice(`Word "${searchWord}" not found in dictionary`);
+			new Notice(t('notice_wordNotFound', { word: searchWord }));
 			return;
 		}
 
 		const { entry, word: lemma } = result;
 
-		await this.createWordFile(lemma, entry, searchWord);
+		const isNewFile = await this.createWordFile(lemma, entry, searchWord);
+
+		if (isNewFile && this.settings.eudicToken && this.settings.autoAddToEudic && this.syncService) {
+			const file = this.app.vault.getAbstractFileByPath(`${this.settings.folderPath}/${lemma}.md`);
+			if (file instanceof TFile) {
+				await this.syncService.handleFileCreated(file);
+			}
+		}
 
 		if (editor) {
 			const selectedText = editor.getSelection();
@@ -214,22 +475,24 @@ export default class LinkDictPlugin extends Plugin {
 		const tags = new Set<string>(['vocabulary']);
 
 		if (this.settings.saveTags && entry.tags.length > 0) {
-			entry.tags.forEach(t => tags.add(`exam/${t}`));
+			for (const tag of entry.tags) {
+				tags.add(`exam/${tag}`);
+			}
 		}
 
-		entry.definitions.forEach(def => {
+		for (const def of entry.definitions) {
 			if (def.pos) {
 				const posTag = def.pos.replace(/\./g, '');
 				tags.add(`pos/${posTag}`);
 			}
-		});
+		}
 
 		const uniqueTags = Array.from(tags);
 
 		const aliases: string[] = [];
-		entry.exchange.forEach(item => {
+		for (const item of entry.exchange) {
 			aliases.push(item.value);
-		});
+		}
 
 		if (originalWord && originalWord.toLowerCase() !== word.toLowerCase()) {
 			aliases.push(originalWord);
@@ -240,31 +503,31 @@ export default class LinkDictPlugin extends Plugin {
 		let yaml = '---\n';
 		yaml += 'tags:\n';
 		for (const tag of uniqueTags) {
-			yaml += `  - ${tag}\n`;
+			yaml += `  - ${escapeYamlString(tag)}\n`;
 		}
 		if (uniqueAliases.length > 0) {
 			yaml += 'aliases:\n';
 			for (const alias of uniqueAliases) {
-				yaml += `  - ${alias}\n`;
+				yaml += `  - ${escapeYamlString(alias)}\n`;
 			}
 		}
 		yaml += '---\n\n';
 
 		let content = `# ${word}\n\n`;
 
-		if (entry.ph_en || entry.ph_am) {
-			content += '## Pronunciation\n\n';
-			if (entry.ph_en) {
-				content += `- UK: \`/${entry.ph_en}/\`\n`;
+		if (entry.ph_uk || entry.ph_us) {
+			content += `## ${t('view_pronunciation')}\n\n`;
+			if (entry.ph_uk) {
+				content += `- ${t('view_uk')}: \`/${entry.ph_uk}/\`\n`;
 			}
-			if (entry.ph_am) {
-				content += `- US: \`/${entry.ph_am}/\`\n`;
+			if (entry.ph_us) {
+				content += `- ${t('view_us')}: \`/${entry.ph_us}/\`\n`;
 			}
 			content += '\n';
 		}
 
 		if (entry.definitions.length > 0) {
-			content += '## Definitions\n\n';
+			content += `## ${t('view_definitions')}\n\n`;
 			for (const def of entry.definitions) {
 				const escapedTrans = def.trans.replace(/\[/g, '\\[');
 				if (def.pos) {
@@ -277,7 +540,7 @@ export default class LinkDictPlugin extends Plugin {
 		}
 
 		if (this.settings.showWebTrans && entry.webTrans && entry.webTrans.length > 0) {
-			content += '## Web translations\n\n';
+			content += `## ${t('view_webTranslations')}\n\n`;
 			for (const item of entry.webTrans) {
 				const numberedValues = item.value.map((v, i) => `${i + 1}. ${v}`).join(' ');
 				content += `- **${item.key}**: ${numberedValues}\n`;
@@ -286,7 +549,7 @@ export default class LinkDictPlugin extends Plugin {
 		}
 
 		if (this.settings.showExamples && entry.bilingualExamples && entry.bilingualExamples.length > 0) {
-			content += '## Examples\n\n';
+			content += `## ${t('view_examples')}\n\n`;
 			for (const example of entry.bilingualExamples) {
 				content += `- ${example.eng}\n`;
 				content += `  - ${example.chn}\n`;
@@ -295,7 +558,7 @@ export default class LinkDictPlugin extends Plugin {
 		}
 
 		if (entry.exchange.length > 0) {
-			content += '## Word forms\n\n';
+			content += `## ${t('view_wordForms')}\n\n`;
 			for (const item of entry.exchange) {
 				content += `- ${item.name}: ${item.value}\n`;
 			}
@@ -305,10 +568,11 @@ export default class LinkDictPlugin extends Plugin {
 		return yaml + content;
 	}
 
-	async createWordFile(word: string, entry: DictEntry, originalWord?: string): Promise<void> {
+	async createWordFile(word: string, entry: DictEntry, originalWord?: string): Promise<boolean> {
 		const folderPath = this.settings.folderPath;
 		const fileName = `${word}.md`;
 		const filePath = `${folderPath}/${fileName}`;
+		let isNewFile = false;
 
 		try {
 			const folderExists = await this.app.vault.adapter.exists(folderPath);
@@ -328,6 +592,7 @@ export default class LinkDictPlugin extends Plugin {
 			} else {
 				await this.app.vault.create(filePath, markdown);
 				new Notice(`Created word file: ${fileName}`);
+				isNewFile = true;
 			}
 
 			await this.app.workspace.openLinkText(filePath, '', true);
@@ -335,6 +600,8 @@ export default class LinkDictPlugin extends Plugin {
 			new Notice(`Failed to create word file: ${fileName}`);
 			console.error('Error creating word file:', error);
 		}
+
+		return isNewFile;
 	}
 
 	async activateView(): Promise<void> {

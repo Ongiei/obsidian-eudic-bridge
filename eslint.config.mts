@@ -28,9 +28,19 @@ export default tseslint.config(
 			'obsidianmd/no-static-styles-assignment': 'off',
 		},
 	},
+	{
+		files: ['src/lemmatizer.ts'],
+		rules: {
+			'@typescript-eslint/no-unsafe-assignment': 'off',
+			'@typescript-eslint/no-unsafe-call': 'off',
+			'@typescript-eslint/no-unsafe-return': 'off',
+			'@typescript-eslint/no-unsafe-member-access': 'off',
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",
+		"vault",
 		"esbuild.config.mjs",
 		"eslint.config.js",
 		"version-bump.mjs",

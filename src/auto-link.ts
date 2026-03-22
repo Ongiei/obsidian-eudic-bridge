@@ -1,0 +1,189 @@
+import { App, Editor, TFile, TFolder } from 'obsidian';
+import { LinkDictSettings } from './settings';
+import { LedgerService } from './ledger';
+import { getLemma } from './lemmatizer';
+
+const WORD_PATTERN = /\b[a-zA-Z]+(?:[-'][a-zA-Z]+)*\b/g;
+
+interface WikiLinkMatch {
+	full: string;
+	word: string;
+	index: number;
+	length: number;
+}
+
+export class AutoLinkService {
+	private app: App;
+	private settings: LinkDictSettings;
+	private ledger: LedgerService;
+	private localWordCache: Set<string> | null = null;
+
+	constructor(app: App, settings: LinkDictSettings, ledger: LedgerService) {
+		this.app = app;
+		this.settings = settings;
+		this.ledger = ledger;
+	}
+
+	invalidateCache(): void {
+		this.localWordCache = null;
+	}
+
+	buildLocalWordCache(): Set<string> {
+		if (this.localWordCache) {
+			return this.localWordCache;
+		}
+
+		const words = new Set<string>();
+		const folderPath = this.settings.folderPath;
+		const folder = this.app.vault.getAbstractFileByPath(folderPath);
+
+		if (folder instanceof TFolder) {
+			for (const file of folder.children) {
+				if (file instanceof TFile && file.extension === 'md') {
+					words.add(file.basename.toLowerCase());
+				}
+			}
+		}
+
+		this.localWordCache = words;
+		return words;
+	}
+
+	async autoLinkCurrentDocument(editor: Editor): Promise<number> {
+		const localWords = this.buildLocalWordCache();
+		const linkedWords = new Set<string>();
+
+		const content = editor.getValue();
+		const lines = content.split('\n');
+		const newLines: string[] = [];
+		let inCodeBlock = false;
+
+		for (const line of lines) {
+			if (line.trim().startsWith('```')) {
+				inCodeBlock = !inCodeBlock;
+				newLines.push(line);
+				continue;
+			}
+
+			if (inCodeBlock) {
+				newLines.push(line);
+				continue;
+			}
+
+			const processedLine = this.processLine(line, localWords, linkedWords);
+			newLines.push(processedLine);
+		}
+
+		editor.setValue(newLines.join('\n'));
+		return linkedWords.size;
+	}
+
+	private processLine(line: string, localWords: Set<string>, linkedWords: Set<string>): string {
+		const wikiLinks = this.findWikiLinks(line);
+
+		for (const wl of wikiLinks) {
+			linkedWords.add(wl.word.toLowerCase());
+		}
+
+		const parts = this.splitByWikiLinks(line, wikiLinks);
+
+		const processedParts = parts.map((part, index) => {
+			if (part.isWikiLink) {
+				return part.text;
+			}
+
+			const processedText = this.skipInlineCode(part.text, localWords, linkedWords);
+
+			const firstOnly = this.settings.autoLinkFirstOnly;
+			return this.linkWordsInText(processedText, localWords, linkedWords, firstOnly);
+		});
+
+		return processedParts.join('');
+	}
+
+	private skipInlineCode(text: string, localWords: Set<string>, linkedWords: Set<string>): string {
+		return text.replace(/`[^`]+`/g, (match) => {
+			return match;
+		});
+	}
+
+	private findWikiLinks(text: string): WikiLinkMatch[] {
+		const links: WikiLinkMatch[] = [];
+		const pattern = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
+		let match: RegExpExecArray | null;
+
+		while ((match = pattern.exec(text)) !== null) {
+			const word = match[1];
+			if (word) {
+				links.push({
+					full: match[0],
+					word,
+					index: match.index,
+					length: match[0].length,
+				});
+			}
+		}
+
+		return links;
+	}
+
+	private splitByWikiLinks(text: string, wikiLinks: WikiLinkMatch[]): { text: string; isWikiLink: boolean }[] {
+		if (wikiLinks.length === 0) {
+			return [{ text, isWikiLink: false }];
+		}
+
+		const parts: { text: string; isWikiLink: boolean }[] = [];
+		let lastEnd = 0;
+
+		for (const wl of wikiLinks) {
+			if (wl.index > lastEnd) {
+				parts.push({ text: text.slice(lastEnd, wl.index), isWikiLink: false });
+			}
+			parts.push({ text: wl.full, isWikiLink: true });
+			lastEnd = wl.index + wl.length;
+		}
+
+		if (lastEnd < text.length) {
+			parts.push({ text: text.slice(lastEnd), isWikiLink: false });
+		}
+
+		return parts;
+	}
+
+	private linkWordsInText(text: string, localWords: Set<string>, linkedWords: Set<string>, firstOnly: boolean): string {
+		return text.replace(WORD_PATTERN, (match) => {
+			const lowerMatch = match.toLowerCase();
+			const lemma = getLemma(lowerMatch);
+
+			if (!localWords.has(lemma)) {
+				return match;
+			}
+
+			if (firstOnly && linkedWords.has(lemma)) {
+				return match;
+			}
+
+			linkedWords.add(lemma);
+
+			if (lowerMatch === lemma) {
+				return `[[${lemma}]]`;
+			} else {
+				return `[[${lemma}|${match}]]`;
+			}
+		});
+	}
+
+	findLocalWord(word: string): string | null {
+		const localWords = this.buildLocalWordCache();
+		const lowerWord = word.toLowerCase();
+		const lemma = getLemma(lowerWord);
+
+		if (localWords.has(lemma)) {
+			return lemma;
+		}
+		if (localWords.has(lowerWord)) {
+			return lowerWord;
+		}
+		return null;
+	}
+}

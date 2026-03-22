@@ -1,6 +1,7 @@
 import {Editor, setIcon, setTooltip} from 'obsidian';
 import LinkDictPlugin from './main';
 import {DictEntry, EditorWithCM} from './types';
+import {t} from './i18n';
 
 export class DefinitionPopover {
 	private overlay: HTMLElement | null = null;
@@ -115,7 +116,7 @@ export class DefinitionPopover {
 		if (!this.entry) {
 			const loading = document.createElement('div');
 			loading.className = 'popover-loading';
-			loading.textContent = 'Loading...';
+			loading.textContent = t('ui_loading');
 			this.overlay.appendChild(loading);
 			return;
 		}
@@ -134,29 +135,29 @@ export class DefinitionPopover {
 		title.textContent = this.originalWord;
 		headerLeft.appendChild(title);
 
-		if (this.entry.ph_en || this.entry.ph_am) {
+		if (this.entry.ph_uk || this.entry.ph_us) {
 			const phoneticContainer = document.createElement('div');
 			phoneticContainer.className = 'dict-phonetic-container';
 
-			if (this.entry.ph_en) {
+			if (this.entry.ph_uk) {
 				const ukPhoneticBtn = document.createElement('div');
 				ukPhoneticBtn.className = 'dict-phonetic-btn';
-				ukPhoneticBtn.textContent = `UK /${this.entry.ph_en}/`;
-				if (this.entry.mp3_en) {
+				ukPhoneticBtn.textContent = `${t('view_uk')} /${this.entry.ph_uk}/`;
+				if (this.entry.audio_uk) {
 					ukPhoneticBtn.addEventListener('click', () => {
-						void new Audio(this.entry!.mp3_en).play();
+						void new Audio(this.entry!.audio_uk).play();
 					});
 				}
 				phoneticContainer.appendChild(ukPhoneticBtn);
 			}
 
-			if (this.entry.ph_am) {
+			if (this.entry.ph_us) {
 				const usPhoneticBtn = document.createElement('div');
 				usPhoneticBtn.className = 'dict-phonetic-btn';
-				usPhoneticBtn.textContent = `US /${this.entry.ph_am}/`;
-				if (this.entry.mp3_am) {
+				usPhoneticBtn.textContent = `${t('view_us')} /${this.entry.ph_us}/`;
+				if (this.entry.audio_us) {
 					usPhoneticBtn.addEventListener('click', () => {
-						void new Audio(this.entry!.mp3_am).play();
+						void new Audio(this.entry!.audio_us).play();
 					});
 				}
 				phoneticContainer.appendChild(usPhoneticBtn);
@@ -167,17 +168,33 @@ export class DefinitionPopover {
 
 		headerContainer.appendChild(headerLeft);
 
+		const actionContainer = document.createElement('div');
+		actionContainer.className = 'popover-actions';
+
 		const createNoteBtn = document.createElement('button');
-		createNoteBtn.className = 'dict-create-note-btn';
+		createNoteBtn.className = 'dict-action-btn';
 		setIcon(createNoteBtn, 'file-plus');
-		setTooltip(createNoteBtn, 'Create Lemma Note');
+		setTooltip(createNoteBtn, t('ui_createLemmaNote'));
 		createNoteBtn.addEventListener('click', () => {
 			void (async () => {
 				await this.plugin.searchAndGenerateNote(this.originalWord);
 				this.close();
 			})();
 		});
-		headerContainer.appendChild(createNoteBtn);
+		actionContainer.appendChild(createNoteBtn);
+
+		if (this.plugin.settings.eudicToken) {
+			const addToEudicBtn = document.createElement('button');
+			addToEudicBtn.className = 'dict-action-btn';
+			setIcon(addToEudicBtn, 'plus-circle');
+			setTooltip(addToEudicBtn, t('ui_addToEudic'));
+			addToEudicBtn.addEventListener('click', () => {
+				void this.plugin.addToEudic(this.originalWord);
+			});
+			actionContainer.appendChild(addToEudicBtn);
+		}
+
+		headerContainer.appendChild(actionContainer);
 
 		header.appendChild(headerContainer);
 		this.overlay.appendChild(header);
