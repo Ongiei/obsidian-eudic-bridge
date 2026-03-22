@@ -1,6 +1,6 @@
 import { App, Notice, TFile } from 'obsidian';
 import { EudicService } from './eudic';
-import { LinkDictSettings, DictionarySource } from './settings';
+import { LinkDictSettings } from './settings';
 import { LedgerService } from './ledger';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
@@ -39,28 +39,6 @@ function escapeYamlString(str: string): string {
 		return `'${str.replace(/'/g, "''")}'`;
 	}
 	return str;
-}
-
-async function pLimit<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
-	const results: T[] = [];
-	const executing: Promise<void>[] = [];
-	
-	for (let i = 0; i < tasks.length; i++) {
-		const task = tasks[i];
-		const p = task().then((result) => {
-			results[i] = result;
-			const index = executing.indexOf(p);
-			if (index > -1) executing.splice(index, 1);
-		});
-		executing.push(p);
-		
-		if (executing.length >= concurrency) {
-			await Promise.race(executing);
-		}
-	}
-	
-	await Promise.all(executing);
-	return results;
 }
 
 export class SyncService {
@@ -230,29 +208,30 @@ export class SyncService {
 			const concurrency = this.settings.syncConcurrency;
 			let current = 0;
 
-			const tasks = wordsToCreate.map((cloudWord) => async () => {
-				const word = cloudWord.word?.trim();
-				if (!word) return;
+			for (let i = 0; i < wordsToCreate.length; i += concurrency) {
+				const batch = wordsToCreate.slice(i, i + concurrency);
+				
+				await Promise.all(batch.map(async (cloudWord) => {
+					const word = cloudWord.word?.trim();
+					if (!word) return;
 
-				const normalizedWord = word.toLowerCase();
-				const lemma = getLemma(normalizedWord);
-				const filePath = `${folderPath}/${lemma}.md`;
+					const normalizedWord = word.toLowerCase();
+					const lemma = getLemma(normalizedWord);
 
-				current++;
-				new Notice(t('notice_syncProgress', { current, total }));
+					current++;
+					new Notice(t('notice_syncProgress', { current, total }));
 
-				try {
-					await this.createWordNoteFromSync(lemma, null, cloudWord.exp || word);
-					this.ledger.markActive(lemma);
-					result.downloaded++;
-				} catch (wordError) {
-					const errorMsg = wordError instanceof Error ? wordError.message : 'Unknown error';
-					console.error(`Failed to sync word "${lemma}":`, errorMsg);
-					result.errors.push(`"${lemma}": ${errorMsg}`);
-				}
-			});
-
-			await pLimit(tasks, concurrency);
+					try {
+						await this.createWordNoteFromSync(lemma, null, cloudWord.exp || word);
+						this.ledger.markActive(lemma);
+						result.downloaded++;
+					} catch (wordError) {
+						const errorMsg = wordError instanceof Error ? wordError.message : 'Unknown error';
+						console.error(`Failed to sync word "${lemma}":`, errorMsg);
+						result.errors.push(`"${lemma}": ${errorMsg}`);
+					}
+				}));
+			}
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 			result.errors.push(errorMessage);
@@ -267,19 +246,21 @@ export class SyncService {
 
 			const concurrency = this.settings.syncConcurrency;
 			
-			const uploadTasks = needsSync.toUpload.map((word) => async () => {
-				try {
-					const listId = this.settings.eudicDefaultListId || '0';
-					await this.eudicService.addWords(listId, [word]);
-					this.ledger.markActive(word);
-					result.uploaded++;
-				} catch (error) {
-					console.error(`Failed to upload ${word}:`, error);
-					result.errors.push(`Upload "${word}" failed`);
-				}
-			});
-
-			await pLimit(uploadTasks, concurrency);
+			for (let i = 0; i < needsSync.toUpload.length; i += concurrency) {
+				const batch = needsSync.toUpload.slice(i, i + concurrency);
+				
+				await Promise.all(batch.map(async (word) => {
+					try {
+						const listId = this.settings.eudicDefaultListId || '0';
+						await this.eudicService.addWords(listId, [word]);
+						this.ledger.markActive(word);
+						result.uploaded++;
+					} catch (error) {
+						console.error(`Failed to upload ${word}:`, error);
+						result.errors.push(`Upload "${word}" failed`);
+					}
+				}));
+			}
 
 			for (const word of needsSync.toDeleteFromCloud) {
 				try {

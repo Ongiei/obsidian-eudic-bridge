@@ -1,5 +1,5 @@
 import { App, Notice, TFile, TFolder } from 'obsidian';
-import { LinkDictSettings, DictionarySource } from './settings';
+import { LinkDictSettings } from './settings';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { t } from './i18n';
