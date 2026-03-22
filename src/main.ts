@@ -7,7 +7,6 @@ import {DictEntry} from "./types";
 import {getLemma} from "./lemmatizer";
 import {EudicService} from "./eudic";
 import {SyncService} from "./sync";
-import {LedgerService} from "./ledger";
 import {AutoLinkService} from "./auto-link";
 import {BatchUpdateService} from "./batch-update";
 import {ConfirmSyncModal} from "./modal";
@@ -37,7 +36,6 @@ export default class LinkDictPlugin extends Plugin {
 	settings: LinkDictSettings;
 	private eudicService: EudicService | null = null;
 	private syncService: SyncService | null = null;
-	private ledgerService: LedgerService | null = null;
 	private autoLinkService: AutoLinkService | null = null;
 	private batchUpdateService: BatchUpdateService | null = null;
 	private syncTimer: number | null = null;
@@ -50,19 +48,13 @@ export default class LinkDictPlugin extends Plugin {
 		await this.loadSettings();
 		this.initLanguage();
 
-		this.ledgerService = new LedgerService(this.app, {
-			loadData: () => this.loadData(),
-			saveData: (data) => this.saveData(data),
-		});
-		await this.ledgerService.load();
-
 		this.registerView(VIEW_TYPE_LINK_DICT, (leaf) => new DictionaryView(leaf, this));
 
 		this.addRibbonIcon('book-open', t('commands_openDictionaryView'), () => {
 			void this.activateView();
 		});
 
-		this.autoLinkService = new AutoLinkService(this.app, this.settings, this.ledgerService);
+		this.autoLinkService = new AutoLinkService(this.app, this.settings);
 
 		this.batchUpdateService = new BatchUpdateService(this.app, this.settings);
 
@@ -103,7 +95,7 @@ export default class LinkDictPlugin extends Plugin {
 			this.app,
 			this.settings,
 			this.eudicService,
-			this.ledgerService!
+			() => this.saveSettings()
 		);
 	}
 
@@ -268,7 +260,7 @@ export default class LinkDictPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on('delete', (file) => {
 				if (file instanceof TFile && file.extension === 'md') {
-					void this.handleFileDeleted(file);
+					this.handleFileDeleted(file);
 				}
 			})
 		);
@@ -357,15 +349,8 @@ export default class LinkDictPlugin extends Plugin {
 			return;
 		}
 
-		this.syncService = new SyncService(
-			this.app,
-			this.settings,
-			this.eudicService,
-			this.ledgerService!
-		);
-
 		try {
-			const preview = await this.syncService.previewSync(this.settings.syncDirection);
+			const preview = await this.syncService.previewSync();
 
 			if (this.syncService.needsDeleteConfirmation(preview)) {
 				new ConfirmSyncModal(
@@ -389,7 +374,7 @@ export default class LinkDictPlugin extends Plugin {
 
 	private async executeSync(): Promise<void> {
 		if (!this.syncService) return;
-		await this.syncService.sync(this.settings.syncDirection);
+		await this.syncService.sync();
 	}
 
 	async performBatchUpdate(): Promise<void> {
@@ -402,7 +387,7 @@ export default class LinkDictPlugin extends Plugin {
 
 	async autoLinkDocument(editor: Editor): Promise<void> {
 		if (!this.autoLinkService) {
-			this.autoLinkService = new AutoLinkService(this.app, this.settings, this.ledgerService!);
+			this.autoLinkService = new AutoLinkService(this.app, this.settings);
 		}
 
 		this.autoLinkService.invalidateCache();
@@ -415,9 +400,9 @@ export default class LinkDictPlugin extends Plugin {
 		await this.syncService.handleFileCreated(file);
 	}
 
-	private async handleFileDeleted(file: TFile): Promise<void> {
+	private handleFileDeleted(file: TFile): void {
 		if (!this.syncService) return;
-		await this.syncService.handleFileDeleted(file);
+		this.syncService.handleFileDeleted(file);
 	}
 
 	async loadSettings(): Promise<void> {

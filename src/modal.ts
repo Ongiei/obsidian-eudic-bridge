@@ -37,13 +37,13 @@ export class ConfirmSyncModal extends Modal {
 			});
 		}
 		
-		if (this.preview.localFilesToMarkDeleted > 0) {
+		if (this.preview.toMarkDeleted > 0) {
 			list.createEl('li', {
-				text: t('confirm_localDeletions', { count: this.preview.localFilesToMarkDeleted })
+				text: t('confirm_localDeletions', { count: this.preview.toMarkDeleted })
 			});
 		}
 
-		const totalDeletions = this.preview.toDeleteFromCloud + this.preview.localFilesToMarkDeleted;
+		const totalDeletions = this.preview.toDeleteFromCloud + this.preview.toMarkDeleted;
 		list.createEl('li', {
 			text: t('confirm_totalDeletions', { count: totalDeletions }),
 			cls: 'sync-total-deletions'

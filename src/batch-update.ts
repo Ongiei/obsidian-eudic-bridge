@@ -1,11 +1,10 @@
-import { App, Notice, TFile, TFolder } from 'obsidian';
+import { App, Notice, TFile, TFolder, parseYaml } from 'obsidian';
 import { LinkDictSettings } from './settings';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { t } from './i18n';
 
 const EUDIC_SYNC_CALLOUT = '> [!info] Eudic Sync';
-const EUDIC_SYNC_STATUS = 'status: eudic-sync';
 
 function delay(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
@@ -17,6 +16,18 @@ function escapeYamlString(str: string): string {
 		return `'${str.replace(/'/g, "''")}'`;
 	}
 	return str;
+}
+
+function hasEudicSyncedFrontmatter(content: string): boolean {
+	const match = content.match(/^---\n([\s\S]*?)\n---/);
+	if (!match || !match[1]) return false;
+	
+	try {
+		const frontmatter = parseYaml(match[1]) as Record<string, unknown>;
+		return frontmatter?.eudic_synced === true;
+	} catch {
+		return false;
+	}
 }
 
 export interface BatchUpdateResult {
@@ -171,7 +182,7 @@ export class BatchUpdateService {
 			return true;
 		}
 
-		if (content.includes(EUDIC_SYNC_STATUS)) {
+		if (hasEudicSyncedFrontmatter(content)) {
 			return true;
 		}
 
@@ -183,7 +194,7 @@ export class BatchUpdateService {
 			return true;
 		}
 
-		if (content.includes(EUDIC_SYNC_STATUS)) {
+		if (hasEudicSyncedFrontmatter(content)) {
 			return true;
 		}
 

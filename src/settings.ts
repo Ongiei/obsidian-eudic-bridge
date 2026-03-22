@@ -1,7 +1,6 @@
 import {AbstractInputSuggest, App, PluginSettingTab, Setting, TAbstractFile, TFolder} from "obsidian";
 import LinkDictPlugin from "./main";
 import {t, detectLanguage, setLanguage} from "./i18n";
-import {SyncDirection} from "./sync";
 
 export type DictionarySource = 'eudic' | 'youdao';
 
@@ -17,15 +16,15 @@ export interface LinkDictSettings {
 	syncInterval: number;
 	syncOnStartup: boolean;
 	startupDelay: number;
-	syncDirection: SyncDirection;
 	language: string;
 	autoLinkFirstOnly: boolean;
 	autoAddToEudic: boolean;
-	cloudDeletedFolder: string;
 	batchChunkSize: number;
 	batchDelayMs: number;
 	dictionarySource: DictionarySource;
 	syncConcurrency: number;
+	apiDelayMs: number;
+	pendingDeletes: string[];
 }
 
 export const DEFAULT_SETTINGS: LinkDictSettings = {
@@ -40,15 +39,15 @@ export const DEFAULT_SETTINGS: LinkDictSettings = {
 	syncInterval: 30,
 	syncOnStartup: false,
 	startupDelay: 10,
-	syncDirection: 'bidirectional',
 	language: 'auto',
 	autoLinkFirstOnly: true,
 	autoAddToEudic: true,
-	cloudDeletedFolder: 'LinkDict/trash',
 	batchChunkSize: 20,
 	batchDelayMs: 10000,
 	dictionarySource: 'eudic',
 	syncConcurrency: 3,
+	apiDelayMs: 200,
+	pendingDeletes: [],
 };
 
 export class LinkDictSettingTab extends PluginSettingTab {
@@ -225,20 +224,6 @@ export class LinkDictSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
-
-		new Setting(containerEl)
-			.setName(t('settings_cloudDeletedFolder'))
-			.setDesc(t('settings_cloudDeletedFolderDesc'))
-			.addText((text) => {
-				new FolderSuggest(this.app, text.inputEl);
-				text
-					.setPlaceholder('Linkdict/trash')
-					.setValue(this.plugin.settings.cloudDeletedFolder)
-					.onChange(async (value) => {
-						this.plugin.settings.cloudDeletedFolder = value;
-						await this.plugin.saveSettings();
-					});
-			});
 	}
 
 	private renderSyncSettings(containerEl: HTMLElement): void {
@@ -260,21 +245,6 @@ export class LinkDictSettingTab extends PluginSettingTab {
 			});
 
 		if (!this.plugin.settings.enableSync) return;
-
-		new Setting(containerEl)
-			.setName(t('settings_syncDirection'))
-			.setDesc(t('settings_syncDirectionDesc'))
-			.addDropdown((dropdown) => {
-				dropdown
-					.addOption('bidirectional', t('settings_bidirectional'))
-					.addOption('to-eudic', t('settings_syncToEudic'))
-					.addOption('from-eudic', t('settings_syncFromEudic'))
-					.setValue(this.plugin.settings.syncDirection)
-					.onChange(async (value) => {
-						this.plugin.settings.syncDirection = value as SyncDirection;
-						await this.plugin.saveSettings();
-					});
-			});
 
 		new Setting(containerEl)
 			.setName(t('settings_syncOnStartup'))

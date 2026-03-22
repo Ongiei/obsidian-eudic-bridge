@@ -1,6 +1,5 @@
 import { App, Editor, TFile, TFolder } from 'obsidian';
 import { LinkDictSettings } from './settings';
-import { LedgerService } from './ledger';
 import { getLemma } from './lemmatizer';
 
 const WORD_PATTERN = /\b[a-zA-Z]+(?:[-'][a-zA-Z]+)*\b/g;
@@ -15,13 +14,11 @@ interface WikiLinkMatch {
 export class AutoLinkService {
 	private app: App;
 	private settings: LinkDictSettings;
-	private ledger: LedgerService;
 	private localWordCache: Set<string> | null = null;
 
-	constructor(app: App, settings: LinkDictSettings, ledger: LedgerService) {
+	constructor(app: App, settings: LinkDictSettings) {
 		this.app = app;
 		this.settings = settings;
-		this.ledger = ledger;
 	}
 
 	invalidateCache(): void {
