@@ -45,6 +45,7 @@ export interface EudicWordData {
 const DEFAULT_API_DELAY_MS = 200;
 
 function delay(ms: number): Promise<void> {
+	console.log(`[DEBUG] delay(${ms}ms)`);
 	return new Promise(resolve => setTimeout(resolve, ms));
 }
 
@@ -56,6 +57,7 @@ export class SyncService {
 	private isSyncing: boolean = false;
 	private shouldAbort: boolean = false;
 	private cachedRemoteData: Map<string, EudicWordData> | null = null;
+	private syncInProgress: boolean = false;
 
 	constructor(
 		app: App,
@@ -67,17 +69,25 @@ export class SyncService {
 		this.settings = settings;
 		this.eudicService = eudicService;
 		this.saveSettings = saveSettings;
+		console.log('[DEBUG] SyncService constructed');
 	}
 
 	isSyncInProgress(): boolean {
+		console.log(`[DEBUG] isSyncInProgress: ${this.isSyncing}`);
 		return this.isSyncing;
+	}
+	
+	isCurrentlySyncing(): boolean {
+		return this.syncInProgress;
 	}
 
 	abort(): void {
+		console.log('[DEBUG] abort() called');
 		this.shouldAbort = true;
 	}
 
 	async dryRun(): Promise<SyncDryRunResult> {
+		console.log('[DEBUG] dryRun() start');
 		const result: SyncDryRunResult = {
 			toDownload: [],
 			toUpload: [],
@@ -87,11 +97,18 @@ export class SyncService {
 		};
 
 		try {
+			console.log('[DEBUG] Fetching remote data...');
 			this.cachedRemoteData = await this.fetchRemoteWordData();
+			console.log(`[DEBUG] Remote data fetched: ${this.cachedRemoteData.size} words`);
+			
+			console.log('[DEBUG] Fetching local data...');
 			const localData = await this.fetchLocalWordData();
+			console.log(`[DEBUG] Local data fetched: ${localData.size} words`);
 
 			const remoteSet = new Set(this.cachedRemoteData.keys());
 			const localSet = new Set(localData.keys());
+
+			console.log(`[DEBUG] Starting diff calculation...`);
 
 			for (const [word] of this.cachedRemoteData) {
 				if (!localSet.has(word)) {
@@ -102,6 +119,7 @@ export class SyncService {
 					});
 				}
 			}
+			console.log(`[DEBUG] toDownload: ${result.toDownload.length}`);
 
 			for (const [word, data] of localData) {
 				if (!remoteSet.has(word)) {
@@ -120,6 +138,7 @@ export class SyncService {
 					}
 				}
 			}
+			console.log(`[DEBUG] toUpload: ${result.toUpload.length}, toMarkDeleted: ${result.toMarkDeleted.length}`);
 
 			for (const word of this.settings.pendingDeletes) {
 				if (remoteSet.has(word)) {
@@ -130,11 +149,14 @@ export class SyncService {
 					});
 				}
 			}
+			console.log(`[DEBUG] toDeleteFromCloud: ${result.toDeleteFromCloud.length}`);
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+			console.error('[DEBUG] dryRun error:', errorMsg);
 			result.errors.push(errorMsg);
 		}
 
+		console.log(`[DEBUG] dryRun() complete`);
 		return result;
 	}
 
@@ -142,7 +164,11 @@ export class SyncService {
 		dryRunResult: SyncDryRunResult, 
 		progressCallback?: (current: number, total: number, word: string) => void
 	): Promise<SyncResult> {
+		console.log('[DEBUG] executeSync() called');
+		console.log(`[DEBUG] isSyncing: ${this.isSyncing}`);
+		
 		if (this.isSyncing) {
+			console.log('[DEBUG] Already syncing, returning early');
 			return {
 				success: false,
 				uploaded: 0,
@@ -156,6 +182,8 @@ export class SyncService {
 
 		this.isSyncing = true;
 		this.shouldAbort = false;
+		this.syncInProgress = true;
+		console.log('[DEBUG] Set isSyncing=true, shouldAbort=false, syncInProgress=true');
 
 		const result: SyncResult = {
 			success: false,
@@ -172,13 +200,20 @@ export class SyncService {
 			dryRunResult.toUpload.length + 
 			dryRunResult.toMarkDeleted.length;
 
+		console.log(`[DEBUG] totalOps: ${totalOps}`);
+
 		let current = 0;
 
 		try {
 			// Phase 1: Delete from cloud (tombstones)
+			console.log(`[DEBUG] === Phase 1: Delete from cloud (${dryRunResult.toDeleteFromCloud.length} items) ===`);
+			let phaseIndex = 0;
 			for (const change of dryRunResult.toDeleteFromCloud) {
+				phaseIndex++;
+				console.log(`[DEBUG] Phase 1 [${phaseIndex}/${dryRunResult.toDeleteFromCloud.length}] Processing: ${change.word}`);
+				
 				if (this.shouldAbort) {
-					console.log('[Sync] Aborted during delete from cloud phase');
+					console.log('[DEBUG] shouldAbort=true, breaking');
 					break;
 				}
 				current++;
@@ -186,26 +221,36 @@ export class SyncService {
 				
 				try {
 					await this.executeDeleteFromCloud(change.word, result);
+					console.log(`[DEBUG] Phase 1 [${phaseIndex}] SUCCESS: ${change.word}`);
 				} catch (err) {
-					console.error(`[Sync] Error deleting ${change.word} from cloud:`, err);
+					console.error(`[DEBUG] Phase 1 [${phaseIndex}] ERROR: ${change.word}`, err);
 					result.errors.push(`Delete "${change.word}" from cloud failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 				
+				console.log(`[DEBUG] Phase 1 [${phaseIndex}] delay...`);
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
+				console.log(`[DEBUG] Phase 1 [${phaseIndex}] delay done`);
 			}
+			console.log(`[DEBUG] === Phase 1 complete ===`);
 
 			// Clean up tombstones
 			this.settings.pendingDeletes = this.settings.pendingDeletes.filter(
 				w => !dryRunResult.toDeleteFromCloud.some(c => c.word === w)
 			);
 			await this.saveSettings();
+			console.log('[DEBUG] Tombstones cleaned');
 
 			// Phase 2: Download from cloud (use cached data)
+			console.log(`[DEBUG] === Phase 2: Download (${dryRunResult.toDownload.length} items) ===`);
 			const remoteData = this.cachedRemoteData || new Map();
-
+			phaseIndex = 0;
+			
 			for (const change of dryRunResult.toDownload) {
+				phaseIndex++;
+				console.log(`[DEBUG] Phase 2 [${phaseIndex}/${dryRunResult.toDownload.length}] Processing: ${change.word}`);
+				
 				if (this.shouldAbort) {
-					console.log('[Sync] Aborted during download phase');
+					console.log('[DEBUG] shouldAbort=true, breaking');
 					break;
 				}
 				current++;
@@ -214,18 +259,28 @@ export class SyncService {
 				try {
 					const wordData = remoteData.get(change.word);
 					await this.executeDownload(change.word, wordData?.exp, result);
+					console.log(`[DEBUG] Phase 2 [${phaseIndex}] SUCCESS: ${change.word}`);
 				} catch (err) {
-					console.error(`[Sync] Error downloading ${change.word}:`, err);
+					console.error(`[DEBUG] Phase 2 [${phaseIndex}] ERROR: ${change.word}`, err);
 					result.errors.push(`Download "${change.word}" failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 				
+				console.log(`[DEBUG] Phase 2 [${phaseIndex}] delay...`);
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
+				console.log(`[DEBUG] Phase 2 [${phaseIndex}] delay done`);
 			}
+			console.log(`[DEBUG] === Phase 2 complete ===`);
 
 			// Phase 3: Upload to cloud
+			console.log(`[DEBUG] === Phase 3: Upload (${dryRunResult.toUpload.length} items) ===`);
+			phaseIndex = 0;
+			
 			for (const change of dryRunResult.toUpload) {
+				phaseIndex++;
+				console.log(`[DEBUG] Phase 3 [${phaseIndex}/${dryRunResult.toUpload.length}] Processing: ${change.word}`);
+				
 				if (this.shouldAbort) {
-					console.log('[Sync] Aborted during upload phase');
+					console.log('[DEBUG] shouldAbort=true, breaking');
 					break;
 				}
 				current++;
@@ -233,18 +288,28 @@ export class SyncService {
 				
 				try {
 					await this.executeUpload(change.word, result);
+					console.log(`[DEBUG] Phase 3 [${phaseIndex}] SUCCESS: ${change.word}`);
 				} catch (err) {
-					console.error(`[Sync] Error uploading ${change.word}:`, err);
+					console.error(`[DEBUG] Phase 3 [${phaseIndex}] ERROR: ${change.word}`, err);
 					result.errors.push(`Upload "${change.word}" failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 				
+				console.log(`[DEBUG] Phase 3 [${phaseIndex}] delay...`);
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
+				console.log(`[DEBUG] Phase 3 [${phaseIndex}] delay done`);
 			}
+			console.log(`[DEBUG] === Phase 3 complete ===`);
 
 			// Phase 4: Mark as cloud-deleted
+			console.log(`[DEBUG] === Phase 4: Mark deleted (${dryRunResult.toMarkDeleted.length} items) ===`);
+			phaseIndex = 0;
+			
 			for (const change of dryRunResult.toMarkDeleted) {
+				phaseIndex++;
+				console.log(`[DEBUG] Phase 4 [${phaseIndex}/${dryRunResult.toMarkDeleted.length}] Processing: ${change.word}`);
+				
 				if (this.shouldAbort) {
-					console.log('[Sync] Aborted during mark deleted phase');
+					console.log('[DEBUG] shouldAbort=true, breaking');
 					break;
 				}
 				current++;
@@ -252,39 +317,50 @@ export class SyncService {
 				
 				try {
 					await this.executeMarkDeleted(change.word, result);
+					console.log(`[DEBUG] Phase 4 [${phaseIndex}] SUCCESS: ${change.word}`);
 				} catch (err) {
-					console.error(`[Sync] Error marking ${change.word} as deleted:`, err);
+					console.error(`[DEBUG] Phase 4 [${phaseIndex}] ERROR: ${change.word}`, err);
 					result.errors.push(`Mark "${change.word}" deleted failed: ${err instanceof Error ? err.message : String(err)}`);
 				}
 				
+				console.log(`[DEBUG] Phase 4 [${phaseIndex}] delay...`);
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
+				console.log(`[DEBUG] Phase 4 [${phaseIndex}] delay done`);
 			}
+			console.log(`[DEBUG] === Phase 4 complete ===`);
 
 			result.success = !this.shouldAbort && result.errors.length === dryRunResult.errors.length;
 			
-			console.log(`[Sync] Completed. Downloaded: ${result.downloaded}, Uploaded: ${result.uploaded}, Marked deleted: ${result.markedDeleted}, Errors: ${result.errors.length}`);
+			console.log(`[DEBUG] Final result - Downloaded: ${result.downloaded}, Uploaded: ${result.uploaded}, MarkedDeleted: ${result.markedDeleted}, Errors: ${result.errors.length}`);
 			
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-			console.error('[Sync] Fatal error:', errorMsg);
+			console.error('[DEBUG] FATAL ERROR in executeSync:', errorMsg);
+			console.error('[DEBUG] Stack:', error instanceof Error ? error.stack : 'No stack');
 			result.errors.push(`Fatal error: ${errorMsg}`);
 		} finally {
+			console.log('[DEBUG] Setting isSyncing=false, syncInProgress=false');
 			this.isSyncing = false;
+			this.syncInProgress = false;
 			this.cachedRemoteData = null;
 		}
 
+		console.log(`[DEBUG] executeSync() returning`);
 		return result;
 	}
 
 	private async fetchRemoteWordData(): Promise<Map<string, EudicWordData>> {
+		console.log('[DEBUG] fetchRemoteWordData() start');
 		const data = new Map<string, EudicWordData>();
 		const listId = this.settings.eudicDefaultListId || '0';
 		let page = 1;
 		const pageSize = 100;
 
 		while (true) {
+			console.log(`[DEBUG] Fetching page ${page}...`);
 			try {
 				const batch = await this.eudicService.getWords(listId, 'en', page, pageSize);
+				console.log(`[DEBUG] Page ${page}: ${batch.length} words`);
 				if (batch.length === 0) break;
 
 				for (const w of batch) {
@@ -297,22 +373,23 @@ export class SyncService {
 				if (batch.length < pageSize) break;
 				page++;
 			} catch (error) {
-				console.error('[Sync] Failed to fetch remote words:', error);
+				console.error('[DEBUG] Error fetching page:', error);
 				throw error;
 			}
 		}
 
-		console.log(`[Sync] Fetched ${data.size} words from remote`);
+		console.log(`[DEBUG] fetchRemoteWordData() complete: ${data.size} words`);
 		return data;
 	}
 
 	private async fetchLocalWordData(): Promise<Map<string, { eudicSynced: boolean; dictSource?: DictSource }>> {
+		console.log('[DEBUG] fetchLocalWordData() start');
 		const data = new Map<string, { eudicSynced: boolean; dictSource?: DictSource }>();
 		const folderPath = this.settings.folderPath;
 		const folder = this.app.vault.getAbstractFileByPath(folderPath);
 
 		if (!(folder instanceof TFolder)) {
-			console.log(`[Sync] Local folder not found: ${folderPath}`);
+			console.log(`[DEBUG] Local folder not found: ${folderPath}`);
 			return data;
 		}
 
@@ -323,7 +400,7 @@ export class SyncService {
 			}
 		}
 
-		console.log(`[Sync] Scanning ${files.length} local files...`);
+		console.log(`[DEBUG] Scanning ${files.length} files...`);
 
 		for (const file of files) {
 			const word = file.basename.toLowerCase();
@@ -335,12 +412,12 @@ export class SyncService {
 					dictSource: fm?.dict_source as DictSource | undefined,
 				});
 			} catch (readError) {
-				console.warn(`[Sync] Could not read file ${file.path}:`, readError);
+				console.warn(`[DEBUG] Could not read ${file.path}:`, readError);
 				data.set(word, { eudicSynced: false });
 			}
 		}
 
-		console.log(`[Sync] Scanned ${data.size} local words`);
+		console.log(`[DEBUG] fetchLocalWordData() complete: ${data.size} words`);
 		return data;
 	}
 
@@ -359,19 +436,24 @@ export class SyncService {
 	}
 
 	private async executeDeleteFromCloud(word: string, result: SyncResult): Promise<void> {
+		console.log(`[DEBUG] executeDeleteFromCloud(${word}) start`);
 		const listId = this.settings.eudicDefaultListId || '0';
 		await this.eudicService.deleteWords(listId, [word]);
 		result.deletedFromCloud++;
-		console.log(`[Sync] Deleted "${word}" from cloud`);
+		console.log(`[DEBUG] executeDeleteFromCloud(${word}) done`);
 	}
 
 	private async executeDownload(word: string, eudicExp: string | undefined, result: SyncResult): Promise<void> {
+		console.log(`[DEBUG] executeDownload(${word}) start`);
 		const folderPath = this.settings.folderPath;
 		const filePath = `${folderPath}/${word}.md`;
 
+		console.log(`[DEBUG] Checking if exists: ${filePath}`);
 		const exists = await this.app.vault.adapter.exists(filePath);
+		console.log(`[DEBUG] Exists: ${exists}`);
+		
 		if (exists) {
-			console.log(`[Sync] File already exists: ${word}`);
+			console.log(`[DEBUG] File already exists, skipping`);
 			result.skipped++;
 			return;
 		}
@@ -397,40 +479,51 @@ export class SyncService {
 		content += `> [!info] Eudic Sync\n`;
 		content += `> [🔄 ${t('sync_clickToUpdate')}](obsidian://linkdict?action=update&word=${encodeURIComponent(word)})\n`;
 
+		console.log(`[DEBUG] Creating file: ${filePath}`);
 		await this.app.vault.create(filePath, content);
+		console.log(`[DEBUG] File created`);
 		result.downloaded++;
-		console.log(`[Sync] Downloaded "${word}"`);
 	}
 
 	private async executeUpload(word: string, result: SyncResult): Promise<void> {
+		console.log(`[DEBUG] executeUpload(${word}) start`);
 		const listId = this.settings.eudicDefaultListId || '0';
+		
+		console.log(`[DEBUG] Calling eudicService.addWords...`);
 		await this.eudicService.addWords(listId, [word]);
+		console.log(`[DEBUG] addWords done`);
 
 		const folderPath = this.settings.folderPath;
 		const filePath = `${folderPath}/${word}.md`;
 		const file = this.app.vault.getAbstractFileByPath(filePath);
 
 		if (file instanceof TFile) {
+			console.log(`[DEBUG] Updating frontmatter...`);
 			await this.safeProcessFrontmatter(file, (fm) => {
 				fm.eudic_synced = true;
 			});
+			console.log(`[DEBUG] Frontmatter updated`);
+		} else {
+			console.log(`[DEBUG] File not found for frontmatter update: ${filePath}`);
 		}
 
 		result.uploaded++;
-		console.log(`[Sync] Uploaded "${word}"`);
+		console.log(`[DEBUG] executeUpload(${word}) done`);
 	}
 
 	private async executeMarkDeleted(word: string, result: SyncResult): Promise<void> {
+		console.log(`[DEBUG] executeMarkDeleted(${word}) start`);
 		const folderPath = this.settings.folderPath;
 		const filePath = `${folderPath}/${word}.md`;
 		const file = this.app.vault.getAbstractFileByPath(filePath);
 
 		if (!(file instanceof TFile)) {
-			console.log(`[Sync] File not found for mark deleted: ${word}`);
+			console.log(`[DEBUG] File not found, skipping`);
 			result.skipped++;
 			return;
 		}
 
+		console.log(`[DEBUG] Updating frontmatter for cloud-deleted...`);
 		await this.safeProcessFrontmatter(file, (fm) => {
 			if (!fm.tags) {
 				fm.tags = ['vocabulary'];
@@ -440,28 +533,43 @@ export class SyncService {
 			}
 			fm.eudic_synced = false;
 		});
+		console.log(`[DEBUG] Frontmatter updated`);
 
 		result.markedDeleted++;
-		console.log(`[Sync] Marked "${word}" as cloud-deleted`);
+		console.log(`[DEBUG] executeMarkDeleted(${word}) done`);
 	}
 
 	private async safeProcessFrontmatter(
 		file: TFile, 
 		processor: (fm: Frontmatter) => void
 	): Promise<void> {
+		console.log(`[DEBUG] safeProcessFrontmatter(${file.path}) start`);
 		await this.app.fileManager.processFrontMatter(file, (fm) => {
+			console.log(`[DEBUG] Inside processFrontMatter callback`);
 			processor(fm as unknown as Frontmatter);
+			console.log(`[DEBUG] processor() done`);
 		});
+		console.log(`[DEBUG] safeProcessFrontmatter done`);
 	}
 
 	private async ensureFolderExists(folderPath: string): Promise<void> {
+		console.log(`[DEBUG] ensureFolderExists(${folderPath})`);
 		const exists = await this.app.vault.adapter.exists(folderPath);
 		if (!exists) {
+			console.log(`[DEBUG] Creating folder...`);
 			await this.app.vault.createFolder(folderPath);
+			console.log(`[DEBUG] Folder created`);
 		}
 	}
 
 	async handleFileCreated(file: TFile): Promise<void> {
+		console.log(`[DEBUG] handleFileCreated(${file.path}) called, syncInProgress=${this.syncInProgress}`);
+		
+		if (this.syncInProgress) {
+			console.log(`[DEBUG] Skipping handleFileCreated - sync in progress`);
+			return;
+		}
+		
 		if (file.extension !== 'md') return;
 
 		const folderPath = this.settings.folderPath;
