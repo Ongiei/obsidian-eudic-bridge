@@ -55,6 +55,7 @@ export class SyncService {
 	private saveSettings: () => Promise<void>;
 	private isSyncing: boolean = false;
 	private shouldAbort: boolean = false;
+	private cachedRemoteData: Map<string, EudicWordData> | null = null;
 
 	constructor(
 		app: App,
@@ -86,13 +87,13 @@ export class SyncService {
 		};
 
 		try {
-			const remoteData = await this.fetchRemoteWordData();
+			this.cachedRemoteData = await this.fetchRemoteWordData();
 			const localData = await this.fetchLocalWordData();
 
-			const remoteSet = new Set(remoteData.keys());
+			const remoteSet = new Set(this.cachedRemoteData.keys());
 			const localSet = new Set(localData.keys());
 
-			for (const [word, data] of remoteData) {
+			for (const [word] of this.cachedRemoteData) {
 				if (!localSet.has(word)) {
 					result.toDownload.push({
 						word,
@@ -137,7 +138,10 @@ export class SyncService {
 		return result;
 	}
 
-	async executeSync(dryRunResult: SyncDryRunResult, progressCallback?: (current: number, total: number, word: string) => void): Promise<SyncResult> {
+	async executeSync(
+		dryRunResult: SyncDryRunResult, 
+		progressCallback?: (current: number, total: number, word: string) => void
+	): Promise<SyncResult> {
 		if (this.isSyncing) {
 			return {
 				success: false,
@@ -163,60 +167,110 @@ export class SyncService {
 			errors: [...dryRunResult.errors],
 		};
 
-		try {
-			const totalOps = dryRunResult.toDeleteFromCloud.length + 
-				dryRunResult.toDownload.length + 
-				dryRunResult.toUpload.length + 
-				dryRunResult.toMarkDeleted.length;
-			
-			let current = 0;
+		const totalOps = dryRunResult.toDeleteFromCloud.length + 
+			dryRunResult.toDownload.length + 
+			dryRunResult.toUpload.length + 
+			dryRunResult.toMarkDeleted.length;
 
+		let current = 0;
+
+		try {
+			// Phase 1: Delete from cloud (tombstones)
 			for (const change of dryRunResult.toDeleteFromCloud) {
-				if (this.shouldAbort) break;
+				if (this.shouldAbort) {
+					console.log('[Sync] Aborted during delete from cloud phase');
+					break;
+				}
 				current++;
 				progressCallback?.(current, totalOps, change.word);
-				await this.executeDeleteFromCloud(change.word, result);
+				
+				try {
+					await this.executeDeleteFromCloud(change.word, result);
+				} catch (err) {
+					console.error(`[Sync] Error deleting ${change.word} from cloud:`, err);
+					result.errors.push(`Delete "${change.word}" from cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+				
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
 			}
 
+			// Clean up tombstones
 			this.settings.pendingDeletes = this.settings.pendingDeletes.filter(
 				w => !dryRunResult.toDeleteFromCloud.some(c => c.word === w)
 			);
 			await this.saveSettings();
 
-			const remoteData = await this.fetchRemoteWordData();
+			// Phase 2: Download from cloud (use cached data)
+			const remoteData = this.cachedRemoteData || new Map();
 
 			for (const change of dryRunResult.toDownload) {
-				if (this.shouldAbort) break;
+				if (this.shouldAbort) {
+					console.log('[Sync] Aborted during download phase');
+					break;
+				}
 				current++;
 				progressCallback?.(current, totalOps, change.word);
-				const wordData = remoteData.get(change.word);
-				await this.executeDownload(change.word, wordData?.exp, result);
+				
+				try {
+					const wordData = remoteData.get(change.word);
+					await this.executeDownload(change.word, wordData?.exp, result);
+				} catch (err) {
+					console.error(`[Sync] Error downloading ${change.word}:`, err);
+					result.errors.push(`Download "${change.word}" failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+				
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
 			}
 
+			// Phase 3: Upload to cloud
 			for (const change of dryRunResult.toUpload) {
-				if (this.shouldAbort) break;
+				if (this.shouldAbort) {
+					console.log('[Sync] Aborted during upload phase');
+					break;
+				}
 				current++;
 				progressCallback?.(current, totalOps, change.word);
-				await this.executeUpload(change.word, result);
+				
+				try {
+					await this.executeUpload(change.word, result);
+				} catch (err) {
+					console.error(`[Sync] Error uploading ${change.word}:`, err);
+					result.errors.push(`Upload "${change.word}" failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+				
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
 			}
 
+			// Phase 4: Mark as cloud-deleted
 			for (const change of dryRunResult.toMarkDeleted) {
-				if (this.shouldAbort) break;
+				if (this.shouldAbort) {
+					console.log('[Sync] Aborted during mark deleted phase');
+					break;
+				}
 				current++;
 				progressCallback?.(current, totalOps, change.word);
-				await this.executeMarkDeleted(change.word, result);
+				
+				try {
+					await this.executeMarkDeleted(change.word, result);
+				} catch (err) {
+					console.error(`[Sync] Error marking ${change.word} as deleted:`, err);
+					result.errors.push(`Mark "${change.word}" deleted failed: ${err instanceof Error ? err.message : String(err)}`);
+				}
+				
 				await delay(this.settings.apiDelayMs || DEFAULT_API_DELAY_MS);
 			}
 
-			result.success = this.shouldAbort || result.errors.length === 0;
+			result.success = !this.shouldAbort && result.errors.length === dryRunResult.errors.length;
+			
+			console.log(`[Sync] Completed. Downloaded: ${result.downloaded}, Uploaded: ${result.uploaded}, Marked deleted: ${result.markedDeleted}, Errors: ${result.errors.length}`);
+			
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-			result.errors.push(errorMsg);
+			console.error('[Sync] Fatal error:', errorMsg);
+			result.errors.push(`Fatal error: ${errorMsg}`);
 		} finally {
 			this.isSyncing = false;
+			this.cachedRemoteData = null;
 		}
 
 		return result;
@@ -243,11 +297,12 @@ export class SyncService {
 				if (batch.length < pageSize) break;
 				page++;
 			} catch (error) {
-				console.error('Failed to fetch remote words:', error);
-				break;
+				console.error('[Sync] Failed to fetch remote words:', error);
+				throw error;
 			}
 		}
 
+		console.log(`[Sync] Fetched ${data.size} words from remote`);
 		return data;
 	}
 
@@ -257,25 +312,35 @@ export class SyncService {
 		const folder = this.app.vault.getAbstractFileByPath(folderPath);
 
 		if (!(folder instanceof TFolder)) {
+			console.log(`[Sync] Local folder not found: ${folderPath}`);
 			return data;
 		}
 
-		for (const file of folder.children) {
-			if (file instanceof TFile && file.extension === 'md') {
-				const word = file.basename.toLowerCase();
-				try {
-					const content = await this.app.vault.read(file);
-					const fm = this.parseFrontmatter(content);
-					data.set(word, {
-						eudicSynced: fm?.eudic_synced === true,
-						dictSource: fm?.dict_source as DictSource | undefined,
-					});
-				} catch {
-					data.set(word, { eudicSynced: false });
-				}
+		const files: TFile[] = [];
+		for (const child of folder.children) {
+			if (child instanceof TFile && child.extension === 'md') {
+				files.push(child);
 			}
 		}
 
+		console.log(`[Sync] Scanning ${files.length} local files...`);
+
+		for (const file of files) {
+			const word = file.basename.toLowerCase();
+			try {
+				const content = await this.app.vault.read(file);
+				const fm = this.parseFrontmatter(content);
+				data.set(word, {
+					eudicSynced: fm?.eudic_synced === true,
+					dictSource: fm?.dict_source as DictSource | undefined,
+				});
+			} catch (readError) {
+				console.warn(`[Sync] Could not read file ${file.path}:`, readError);
+				data.set(word, { eudicSynced: false });
+			}
+		}
+
+		console.log(`[Sync] Scanned ${data.size} local words`);
 		return data;
 	}
 
@@ -294,130 +359,98 @@ export class SyncService {
 	}
 
 	private async executeDeleteFromCloud(word: string, result: SyncResult): Promise<void> {
-		try {
-			const listId = this.settings.eudicDefaultListId || '0';
-			await this.eudicService.deleteWords(listId, [word]);
-			result.deletedFromCloud++;
-		} catch (error) {
-			console.error(`Failed to delete "${word}" from cloud:`, error);
-			result.errors.push(`Delete "${word}" from cloud failed`);
-		}
+		const listId = this.settings.eudicDefaultListId || '0';
+		await this.eudicService.deleteWords(listId, [word]);
+		result.deletedFromCloud++;
+		console.log(`[Sync] Deleted "${word}" from cloud`);
 	}
 
 	private async executeDownload(word: string, eudicExp: string | undefined, result: SyncResult): Promise<void> {
-		try {
-			const folderPath = this.settings.folderPath;
-			const filePath = `${folderPath}/${word}.md`;
+		const folderPath = this.settings.folderPath;
+		const filePath = `${folderPath}/${word}.md`;
 
-			const exists = await this.app.vault.adapter.exists(filePath);
-			if (exists) {
-				result.skipped++;
-				return;
-			}
-
-			await this.ensureFolderExists(folderPath);
-
-			const frontmatter: Frontmatter = {
-				tags: ['vocabulary'],
-				eudic_synced: true,
-				dict_source: 'eudic',
-			};
-
-			let content = `---\n${stringifyYaml(frontmatter)}---\n\n`;
-			content += `# ${word}\n\n`;
-			content += `## ${t('view_definitions')}\n\n`;
-			
-			if (eudicExp) {
-				content += `- ${eudicExp}\n\n`;
-			} else {
-				content += `*Definition pending update*\n\n`;
-			}
-
-			content += `> [!info] Eudic Sync\n`;
-			content += `> [🔄 ${t('sync_clickToUpdate')}](obsidian://linkdict?action=update&word=${encodeURIComponent(word)})\n`;
-
-			await this.app.vault.create(filePath, content);
-			result.downloaded++;
-		} catch (error) {
-			console.error(`Failed to download "${word}":`, error);
-			result.errors.push(`Download "${word}" failed`);
+		const exists = await this.app.vault.adapter.exists(filePath);
+		if (exists) {
+			console.log(`[Sync] File already exists: ${word}`);
+			result.skipped++;
+			return;
 		}
+
+		await this.ensureFolderExists(folderPath);
+
+		const frontmatter: Frontmatter = {
+			tags: ['vocabulary'],
+			eudic_synced: true,
+			dict_source: 'eudic',
+		};
+
+		let content = `---\n${stringifyYaml(frontmatter)}---\n\n`;
+		content += `# ${word}\n\n`;
+		content += `## ${t('view_definitions')}\n\n`;
+		
+		if (eudicExp) {
+			content += `- ${eudicExp}\n\n`;
+		} else {
+			content += `*Definition pending update*\n\n`;
+		}
+
+		content += `> [!info] Eudic Sync\n`;
+		content += `> [🔄 ${t('sync_clickToUpdate')}](obsidian://linkdict?action=update&word=${encodeURIComponent(word)})\n`;
+
+		await this.app.vault.create(filePath, content);
+		result.downloaded++;
+		console.log(`[Sync] Downloaded "${word}"`);
 	}
 
 	private async executeUpload(word: string, result: SyncResult): Promise<void> {
-		try {
-			const listId = this.settings.eudicDefaultListId || '0';
-			await this.eudicService.addWords(listId, [word]);
+		const listId = this.settings.eudicDefaultListId || '0';
+		await this.eudicService.addWords(listId, [word]);
 
-			const folderPath = this.settings.folderPath;
-			const filePath = `${folderPath}/${word}.md`;
-			const file = this.app.vault.getAbstractFileByPath(filePath);
+		const folderPath = this.settings.folderPath;
+		const filePath = `${folderPath}/${word}.md`;
+		const file = this.app.vault.getAbstractFileByPath(filePath);
 
-			if (file instanceof TFile) {
-				await this.processFile(file, (content, fm) => {
-					fm.eudic_synced = true;
-					return content;
-				});
-			}
-
-			result.uploaded++;
-		} catch (error) {
-			console.error(`Failed to upload "${word}":`, error);
-			result.errors.push(`Upload "${word}" failed`);
+		if (file instanceof TFile) {
+			await this.safeProcessFrontmatter(file, (fm) => {
+				fm.eudic_synced = true;
+			});
 		}
+
+		result.uploaded++;
+		console.log(`[Sync] Uploaded "${word}"`);
 	}
 
 	private async executeMarkDeleted(word: string, result: SyncResult): Promise<void> {
-		try {
-			const folderPath = this.settings.folderPath;
-			const filePath = `${folderPath}/${word}.md`;
-			const file = this.app.vault.getAbstractFileByPath(filePath);
+		const folderPath = this.settings.folderPath;
+		const filePath = `${folderPath}/${word}.md`;
+		const file = this.app.vault.getAbstractFileByPath(filePath);
 
-			if (!(file instanceof TFile)) {
-				result.skipped++;
-				return;
-			}
-
-			await this.processFile(file, (content, fm) => {
-				if (!fm.tags) {
-					fm.tags = ['vocabulary'];
-				}
-				if (!fm.tags.includes('linkdict/cloud-deleted')) {
-					fm.tags.push('linkdict/cloud-deleted');
-				}
-				fm.eudic_synced = false;
-				return content;
-			});
-
-			result.markedDeleted++;
-		} catch (error) {
-			console.error(`Failed to mark "${word}" as deleted:`, error);
-			result.errors.push(`Mark "${word}" deleted failed`);
+		if (!(file instanceof TFile)) {
+			console.log(`[Sync] File not found for mark deleted: ${word}`);
+			result.skipped++;
+			return;
 		}
+
+		await this.safeProcessFrontmatter(file, (fm) => {
+			if (!fm.tags) {
+				fm.tags = ['vocabulary'];
+			}
+			if (!fm.tags.includes('linkdict/cloud-deleted')) {
+				fm.tags.push('linkdict/cloud-deleted');
+			}
+			fm.eudic_synced = false;
+		});
+
+		result.markedDeleted++;
+		console.log(`[Sync] Marked "${word}" as cloud-deleted`);
 	}
 
-	async processFile(file: TFile, processor: (content: string, frontmatter: Frontmatter) => string): Promise<void> {
-		await this.app.vault.process(file, (data) => {
-			const match = data.match(/^(---\n[\s\S]*?\n---\n)([\s\S]*)$/);
-			
-			let fm: Frontmatter;
-			let body: string;
-
-			if (match && match[1] && match[2]) {
-				try {
-					fm = parseYaml(match[1].replace(/^---\n/, '').replace(/\n---\n$/, '')) as Frontmatter;
-				} catch {
-					fm = { tags: ['vocabulary'] };
-				}
-				body = match[2];
-			} else {
-				fm = { tags: ['vocabulary'] };
-				body = data;
-			}
-
-			const newBody = processor(body, fm);
-			const newFm = `---\n${stringifyYaml(fm)}---\n`;
-			return newFm + newBody;
+	private async safeProcessFrontmatter(
+		file: TFile, 
+		processor: (fm: Frontmatter) => void
+	): Promise<void> {
+		await this.app.fileManager.processFrontMatter(file, (fm) => {
+			processor(fm as unknown as Frontmatter);
 		});
 	}
 
@@ -442,9 +475,8 @@ export class SyncService {
 		try {
 			const listId = this.settings.eudicDefaultListId || '0';
 			await this.eudicService.addWords(listId, [word]);
-			await this.processFile(file, (content, fm) => {
+			await this.safeProcessFrontmatter(file, (fm) => {
 				fm.eudic_synced = true;
-				return content;
 			});
 			console.debug(`Auto-added "${word}" to eudic`);
 		} catch (error) {

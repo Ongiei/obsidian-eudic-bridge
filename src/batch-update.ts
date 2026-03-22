@@ -1,9 +1,9 @@
-import { App, Modal, TFile, TFolder, parseYaml, stringifyYaml, setIcon } from 'obsidian';
+import { App, Modal, TFile, TFolder, parseYaml, stringifyYaml } from 'obsidian';
 import { LinkDictSettings } from './settings';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { t } from './i18n';
-import type { DictSource, Frontmatter } from './sync';
+import type { Frontmatter } from './sync';
 
 export interface BatchUpdateResult {
 	total: number;
@@ -14,10 +14,8 @@ export interface BatchUpdateResult {
 
 export class ProgressModal extends Modal {
 	private title: string;
-	private current: number = 0;
-	private total: number = 0;
-	private word: string = '';
 	private progressBar: HTMLElement;
+	private progressBarFill: HTMLElement;
 	private statusText: HTMLElement;
 	private abortBtn: HTMLButtonElement;
 	private onAbort: () => void;
@@ -36,7 +34,7 @@ export class ProgressModal extends Modal {
 		contentEl.createEl('h2', { text: this.title });
 
 		this.progressBar = contentEl.createEl('div', { cls: 'progress-bar-container' });
-		this.progressBar.createEl('div', { cls: 'progress-bar-fill' });
+		this.progressBarFill = this.progressBar.createEl('div', { cls: 'progress-bar-fill' });
 
 		this.statusText = contentEl.createEl('p', { cls: 'progress-status' });
 		this.statusText.textContent = t('progress_preparing');
@@ -53,16 +51,9 @@ export class ProgressModal extends Modal {
 	}
 
 	updateProgress(current: number, total: number, word: string) {
-		this.current = current;
-		this.total = total;
-		this.word = word;
-
-		if (this.progressBar) {
-			const fill = this.progressBar.querySelector('.progress-bar-fill') as HTMLElement;
-			if (fill && total > 0) {
-				const percent = (current / total) * 100;
-				fill.style.width = `${percent}%`;
-			}
+		if (this.progressBarFill && total > 0) {
+			const percent = (current / total) * 100;
+			this.progressBarFill.style.width = `${percent}%`;
 		}
 
 		if (this.statusText) {
@@ -83,7 +74,7 @@ export class ProgressModal extends Modal {
 			this.abortBtn.textContent = t('progress_close');
 			this.abortBtn.disabled = false;
 			this.abortBtn.classList.remove('mod-warning');
-			this.abortBtn.addEventListener('click', () => this.close());
+			this.abortBtn.onclick = () => this.close();
 		}
 	}
 
@@ -132,43 +123,59 @@ export class BatchUpdateService {
 		modal.open();
 
 		try {
+			console.log('[BatchUpdate] Finding files needing update...');
 			const filesNeedingUpdate = await this.findFilesNeedingUpdate();
 			result.total = filesNeedingUpdate.length;
+
+			console.log(`[BatchUpdate] Found ${result.total} files to update`);
 
 			if (filesNeedingUpdate.length === 0) {
 				modal.setComplete(result);
 				return result;
 			}
 
+			// Process files ONE BY ONE with proper error handling
 			for (let i = 0; i < filesNeedingUpdate.length; i++) {
+				// Check abort conditions
 				if (this.shouldStop || modal.isAbortedByUser()) {
+					console.log(`[BatchUpdate] Aborted at file ${i + 1}/${result.total}`);
 					break;
 				}
 
 				const file = filesNeedingUpdate[i];
-				if (!file) continue;
+				if (!file) {
+					console.warn(`[BatchUpdate] Null file at index ${i}`);
+					continue;
+				}
 
 				const word = file.basename;
 				modal.updateProgress(i + 1, result.total, word);
 
+				// Wrap each file update in its own try-catch
 				try {
 					const didUpdate = await this.updateFileSafely(file);
 					if (didUpdate) {
 						result.updated++;
+						console.log(`[BatchUpdate] Updated "${word}" (${i + 1}/${result.total})`);
 					} else {
 						result.skipped++;
+						console.log(`[BatchUpdate] Skipped "${word}" (${i + 1}/${result.total})`);
 					}
-				} catch (error) {
-					console.error(`Failed to update ${word}:`, error);
+				} catch (err) {
+					const errMsg = err instanceof Error ? err.message : String(err);
+					console.error(`[BatchUpdate] Failed "${word}":`, errMsg);
 					result.failed++;
 				}
 
+				// Small delay between files to avoid overwhelming the system
 				await this.delay(100);
 			}
 
+			console.log(`[BatchUpdate] Complete. Updated: ${result.updated}, Skipped: ${result.skipped}, Failed: ${result.failed}`);
 			modal.setComplete(result);
 		} catch (error) {
-			console.error('Batch update error:', error);
+			const errMsg = error instanceof Error ? error.message : String(error);
+			console.error('[BatchUpdate] Fatal error:', errMsg);
 			modal.setComplete(result);
 		} finally {
 			this.isRunning = false;
@@ -184,28 +191,26 @@ export class BatchUpdateService {
 	private async updateFileSafely(file: TFile): Promise<boolean> {
 		const word = file.basename;
 
-		try {
-			const content = await this.app.vault.read(file);
-			const fm = this.parseFrontmatter(content);
+		// Read current content
+		const content = await this.app.vault.read(file);
+		const fm = this.parseFrontmatter(content);
 
-			if (fm?.dict_source === 'youdao') {
-				return false;
-			}
-
-			const entry = await YoudaoService.lookup(word);
-			if (!entry) {
-				return false;
-			}
-
-			await this.app.vault.process(file, () => {
-				return this.generateFullMarkdown(word, entry);
-			});
-
-			return true;
-		} catch (error) {
-			console.error(`Failed to update ${word}:`, error);
-			throw error;
+		// Skip already updated files
+		if (fm?.dict_source === 'youdao') {
+			return false;
 		}
+
+		// Fetch definition
+		const entry = await YoudaoService.lookup(word);
+		if (!entry) {
+			return false;
+		}
+
+		// Use vault.process for atomic write
+		const newContent = this.generateFullMarkdown(word, entry);
+		await this.app.vault.process(file, () => newContent);
+
+		return true;
 	}
 
 	private parseFrontmatter(content: string): Frontmatter | null {
@@ -226,24 +231,33 @@ export class BatchUpdateService {
 		const folder = this.app.vault.getAbstractFileByPath(folderPath);
 
 		if (!(folder instanceof TFolder)) {
+			console.log(`[BatchUpdate] Folder not found: ${folderPath}`);
 			return [];
 		}
 
 		const files: TFile[] = [];
+		const children = folder.children;
 
-		for (const file of folder.children) {
-			if (file instanceof TFile && file.extension === 'md') {
-				const content = await this.app.vault.read(file);
-				const fm = this.parseFrontmatter(content);
+		// Process files sequentially to avoid file lock issues
+		for (const child of children) {
+			if (child instanceof TFile && child.extension === 'md') {
+				try {
+					const content = await this.app.vault.read(child);
+					const fm = this.parseFrontmatter(content);
 
-				if (fm?.dict_source === 'youdao') {
-					continue;
-				}
+					// Skip already updated files
+					if (fm?.dict_source === 'youdao') {
+						continue;
+					}
 
-				if (content.includes('eudic_synced: true') || 
-					content.includes('eudic_synced:True') ||
-					content.includes('[!info] Eudic Sync')) {
-					files.push(file);
+					// Check if file needs update
+					if (content.includes('eudic_synced: true') ||
+						content.includes('eudic_synced:True') ||
+						content.includes('[!info] Eudic Sync')) {
+						files.push(child);
+					}
+				} catch (readErr) {
+					console.warn(`[BatchUpdate] Could not read ${child.path}:`, readErr);
 				}
 			}
 		}
@@ -349,12 +363,14 @@ export class BatchUpdateService {
 			const file = this.app.vault.getAbstractFileByPath(filePath);
 
 			if (!(file instanceof TFile)) {
+				console.log(`[BatchUpdate] File not found: ${filePath}`);
 				return false;
 			}
 
 			return await this.updateFileSafely(file);
 		} catch (error) {
-			console.error(`Failed to update ${word}:`, error);
+			const errMsg = error instanceof Error ? error.message : String(error);
+			console.error(`[BatchUpdate] Failed to update ${word}:`, errMsg);
 			return false;
 		}
 	}

@@ -76,6 +76,7 @@ const en: Translations = {
 	notice_autoLinkCompleted: 'Auto-link completed. Added {count} links.',
 	notice_updateSuccess: 'Updated definition for "{word}"',
 	notice_updateFailed: 'Failed to update "{word}"',
+	notice_syncProgress: 'Syncing... {current}/{total}: {word}',
 	
 	confirm_cancel: 'Cancel',
 	confirm_continue: 'Confirm Sync',
@@ -186,6 +187,7 @@ const zh: Translations = {
 	notice_autoLinkCompleted: '自动链接完成。添加了 {count} 个链接。',
 	notice_updateSuccess: '已更新 "{word}" 的释义',
 	notice_updateFailed: '更新 "{word}" 失败',
+	notice_syncProgress: '正在同步... {current}/{total}: {word}',
 	
 	confirm_cancel: '取消',
 	confirm_continue: '确认同步',
