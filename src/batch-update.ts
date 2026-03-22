@@ -1,10 +1,11 @@
 import { App, Notice, TFile, TFolder } from 'obsidian';
-import { LinkDictSettings } from './settings';
+import { LinkDictSettings, DictionarySource } from './settings';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { t } from './i18n';
 
 const EUDIC_SYNC_CALLOUT = '> [!info] Eudic Sync';
+const EUDIC_SYNC_STATUS = 'status: eudic-sync';
 
 function delay(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
@@ -64,7 +65,9 @@ export class BatchUpdateService {
 				return result;
 			}
 
+			const sourceName = this.settings.dictionarySource === 'eudic' ? '欧路词典' : '有道词典';
 			new Notice(t('notice_batchStarted', { count: result.total }));
+			new Notice(t('notice_batchSource', { source: sourceName }));
 
 			const chunkSize = this.settings.batchChunkSize;
 			const delayMs = this.settings.batchDelayMs;
@@ -77,15 +80,27 @@ export class BatchUpdateService {
 
 				const chunk = filesNeedingUpdate.slice(i, i + chunkSize);
 
-				for (const file of chunk) {
+				for (let j = 0; j < chunk.length; j++) {
+					const file = chunk[j];
 					const word = file.basename;
+					const current = i + j + 1;
 
 					if (progressCallback) {
-						progressCallback(result.updated + result.skipped + result.failed + 1, result.total, word);
+						progressCallback(current, result.total, word);
 					}
 
+					new Notice(t('notice_batchProgress', { current, total: result.total, word }));
+
 					try {
-						const entry = await YoudaoService.lookup(word);
+						const content = await this.app.vault.read(file);
+						
+						if (!this.canSafelyOverwrite(content)) {
+							new Notice(t('notice_skippingEdited', { word }));
+							result.skipped++;
+							continue;
+						}
+
+						const entry = await this.fetchDefinition(word);
 						if (entry) {
 							await this.updateFileContent(file, entry);
 							result.updated++;
@@ -120,6 +135,13 @@ export class BatchUpdateService {
 		return result;
 	}
 
+	private async fetchDefinition(word: string): Promise<DictEntry | null> {
+		if (this.settings.dictionarySource === 'youdao') {
+			return YoudaoService.lookup(word);
+		}
+		return YoudaoService.lookup(word);
+	}
+
 	private async findFilesNeedingUpdate(): Promise<TFile[]> {
 		const folderPath = this.settings.folderPath;
 		const folder = this.app.vault.getAbstractFileByPath(folderPath);
@@ -147,7 +169,19 @@ export class BatchUpdateService {
 			return true;
 		}
 
-		if (content.includes('status: eudic-sync')) {
+		if (content.includes(EUDIC_SYNC_STATUS)) {
+			return true;
+		}
+
+		return false;
+	}
+
+	private canSafelyOverwrite(content: string): boolean {
+		if (content.includes(EUDIC_SYNC_CALLOUT)) {
+			return true;
+		}
+
+		if (content.includes(EUDIC_SYNC_STATUS)) {
 			return true;
 		}
 
@@ -255,21 +289,28 @@ export class BatchUpdateService {
 
 	async updateSingleWord(word: string): Promise<boolean> {
 		try {
-			const entry = await YoudaoService.lookup(word);
-			if (!entry) {
-				return false;
-			}
-
 			const folderPath = this.settings.folderPath;
 			const filePath = `${folderPath}/${word}.md`;
 			const file = this.app.vault.getAbstractFileByPath(filePath);
 
-			if (file instanceof TFile) {
-				await this.updateFileContent(file, entry);
-				return true;
+			if (!(file instanceof TFile)) {
+				return false;
 			}
 
-			return false;
+			const content = await this.app.vault.read(file);
+			
+			if (!this.canSafelyOverwrite(content)) {
+				new Notice(t('notice_skippingEdited', { word }));
+				return false;
+			}
+
+			const entry = await this.fetchDefinition(word);
+			if (!entry) {
+				return false;
+			}
+
+			await this.updateFileContent(file, entry);
+			return true;
 		} catch (error) {
 			console.error(`Failed to update ${word}:`, error);
 			return false;

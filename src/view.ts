@@ -188,27 +188,31 @@ export class DictionaryView extends ItemView {
 	}
 
 	private renderExtendedData(container: HTMLElement, entry: DictEntry) {
-		this.renderSection(container, t('view_webTranslations'), 'dict-web-trans', this.plugin.settings.showWebTrans, entry.webTrans, (details) => {
-			const webList = details.createEl('ul', { cls: 'dict-web-list' });
-			entry.webTrans!.forEach(item => {
-				const li = webList.createEl('li', { cls: 'dict-web-item' });
-				const keyEl = li.createEl('span', { cls: 'dict-web-key' });
-				keyEl.textContent = `${item.key}: `;
-				const valueEl = li.createEl('span', { cls: 'dict-web-value' });
-				valueEl.textContent = item.value.map((v, i) => `${i + 1}. ${v}`).join(' ');
+		if (this.plugin.settings.showWebTrans && entry.webTrans && entry.webTrans.length > 0) {
+			this.renderSection(container, t('view_webTranslations'), 'dict-web-trans', true, entry.webTrans, (details) => {
+				const webList = details.createEl('ul', { cls: 'dict-web-list' });
+				entry.webTrans!.forEach(item => {
+					const li = webList.createEl('li', { cls: 'dict-web-item' });
+					const keyEl = li.createEl('span', { cls: 'dict-web-key' });
+					keyEl.textContent = `${item.key}: `;
+					const valueEl = li.createEl('span', { cls: 'dict-web-value' });
+					valueEl.textContent = item.value.map((v, i) => `${i + 1}. ${v}`).join(' ');
+				});
 			});
-		});
+		}
 
-		this.renderSection(container, t('view_examples'), 'dict-examples', this.plugin.settings.showExamples, entry.bilingualExamples, (details) => {
-			const examplesList = details.createEl('div', { cls: 'dict-examples-list' });
-			entry.bilingualExamples!.forEach(example => {
-				const exampleRow = examplesList.createEl('div', { cls: 'dict-example-row' });
-				const enEl = exampleRow.createEl('p', { cls: 'dict-example-en' });
-				enEl.textContent = example.eng;
-				const cnEl = exampleRow.createEl('p', { cls: 'dict-example-cn' });
-				cnEl.textContent = example.chn;
+		if (this.plugin.settings.showExamples && entry.bilingualExamples && entry.bilingualExamples.length > 0) {
+			this.renderSection(container, t('view_examples'), 'dict-examples', true, entry.bilingualExamples, (details) => {
+				const examplesList = details.createEl('div', { cls: 'dict-examples-list' });
+				entry.bilingualExamples!.forEach(example => {
+					const exampleRow = examplesList.createEl('div', { cls: 'dict-example-row' });
+					const enEl = exampleRow.createEl('p', { cls: 'dict-example-en' });
+					enEl.textContent = example.eng;
+					const cnEl = exampleRow.createEl('p', { cls: 'dict-example-cn' });
+					cnEl.textContent = example.chn;
+				});
 			});
-		});
+		}
 	}
 
 	private renderSection<T>(

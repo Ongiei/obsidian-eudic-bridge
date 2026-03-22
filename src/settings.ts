@@ -3,6 +3,8 @@ import LinkDictPlugin from "./main";
 import {t, detectLanguage, setLanguage} from "./i18n";
 import {SyncDirection} from "./sync";
 
+export type DictionarySource = 'eudic' | 'youdao';
+
 export interface LinkDictSettings {
 	folderPath: string;
 	saveTags: boolean;
@@ -22,6 +24,8 @@ export interface LinkDictSettings {
 	cloudDeletedFolder: string;
 	batchChunkSize: number;
 	batchDelayMs: number;
+	dictionarySource: DictionarySource;
+	syncConcurrency: number;
 }
 
 export const DEFAULT_SETTINGS: LinkDictSettings = {
@@ -43,6 +47,8 @@ export const DEFAULT_SETTINGS: LinkDictSettings = {
 	cloudDeletedFolder: 'LinkDict/trash',
 	batchChunkSize: 20,
 	batchDelayMs: 10000,
+	dictionarySource: 'eudic',
+	syncConcurrency: 3,
 };
 
 export class LinkDictSettingTab extends PluginSettingTab {
@@ -178,6 +184,20 @@ export class LinkDictSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName(t('settings_eudicIntegration'))
 			.setHeading();
+
+		new Setting(containerEl)
+			.setName(t('settings_dictionarySource'))
+			.setDesc(t('settings_dictionarySourceDesc'))
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('eudic', t('settings_sourceEudic'))
+					.addOption('youdao', t('settings_sourceYoudao'))
+					.setValue(this.plugin.settings.dictionarySource)
+					.onChange(async (value) => {
+						this.plugin.settings.dictionarySource = value as 'eudic' | 'youdao';
+						await this.plugin.saveSettings();
+					});
+			});
 
 		new Setting(containerEl)
 			.setName(t('settings_eudicApiToken'))
@@ -317,6 +337,22 @@ export class LinkDictSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName(t('settings_batchSettings'))
 			.setHeading();
+
+		new Setting(containerEl)
+			.setName(t('settings_syncConcurrency'))
+			.setDesc(t('settings_syncConcurrencyDesc'))
+			.addText((text) => {
+				text
+					.setValue(String(this.plugin.settings.syncConcurrency))
+					.onChange(async (value) => {
+						const num = parseInt(value, 10);
+						if (!isNaN(num) && num >= 1 && num <= 10) {
+							this.plugin.settings.syncConcurrency = num;
+							await this.plugin.saveSettings();
+						}
+					});
+				text.inputEl.type = 'number';
+			});
 
 		new Setting(containerEl)
 			.setName(t('settings_batchChunkSize'))

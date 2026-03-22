@@ -1,7 +1,8 @@
 import { App, Notice, TFile } from 'obsidian';
 import { EudicService } from './eudic';
-import { LinkDictSettings } from './settings';
+import { LinkDictSettings, DictionarySource } from './settings';
 import { LedgerService } from './ledger';
+import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { getLemma } from './lemmatizer';
 import { t } from './i18n';
@@ -38,6 +39,28 @@ function escapeYamlString(str: string): string {
 		return `'${str.replace(/'/g, "''")}'`;
 	}
 	return str;
+}
+
+async function pLimit<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
+	const results: T[] = [];
+	const executing: Promise<void>[] = [];
+	
+	for (let i = 0; i < tasks.length; i++) {
+		const task = tasks[i];
+		const p = task().then((result) => {
+			results[i] = result;
+			const index = executing.indexOf(p);
+			if (index > -1) executing.splice(index, 1);
+		});
+		executing.push(p);
+		
+		if (executing.length >= concurrency) {
+			await Promise.race(executing);
+		}
+	}
+	
+	await Promise.all(executing);
+	return results;
 }
 
 export class SyncService {
@@ -194,21 +217,31 @@ export class SyncService {
 			const folderPath = this.settings.folderPath;
 			await this.ensureFolderExists(folderPath);
 
-			for (const cloudWord of allCloudWords) {
+			const wordsToCreate = allCloudWords.filter(cloudWord => {
 				const word = cloudWord.word?.trim();
-				if (!word) continue;
+				if (!word) return false;
+				const normalizedWord = word.toLowerCase();
+				const lemma = getLemma(normalizedWord);
+				const filePath = `${folderPath}/${lemma}.md`;
+				return !this.app.vault.getAbstractFileByPath(filePath);
+			});
+
+			const total = wordsToCreate.length;
+			const concurrency = this.settings.syncConcurrency;
+			let current = 0;
+
+			const tasks = wordsToCreate.map((cloudWord) => async () => {
+				const word = cloudWord.word?.trim();
+				if (!word) return;
 
 				const normalizedWord = word.toLowerCase();
 				const lemma = getLemma(normalizedWord);
 				const filePath = `${folderPath}/${lemma}.md`;
 
-				try {
-					const fileExists = await this.app.vault.adapter.exists(filePath);
-					if (fileExists) {
-						result.skipped++;
-						continue;
-					}
+				current++;
+				new Notice(t('notice_syncProgress', { current, total }));
 
+				try {
 					await this.createWordNoteFromSync(lemma, null, cloudWord.exp || word);
 					this.ledger.markActive(lemma);
 					result.downloaded++;
@@ -217,7 +250,9 @@ export class SyncService {
 					console.error(`Failed to sync word "${lemma}":`, errorMsg);
 					result.errors.push(`"${lemma}": ${errorMsg}`);
 				}
-			}
+			});
+
+			await pLimit(tasks, concurrency);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 			result.errors.push(errorMessage);
@@ -230,7 +265,9 @@ export class SyncService {
 
 			const needsSync = this.ledger.getEntriesNeedingSync();
 
-			for (const word of needsSync.toUpload) {
+			const concurrency = this.settings.syncConcurrency;
+			
+			const uploadTasks = needsSync.toUpload.map((word) => async () => {
 				try {
 					const listId = this.settings.eudicDefaultListId || '0';
 					await this.eudicService.addWords(listId, [word]);
@@ -240,7 +277,9 @@ export class SyncService {
 					console.error(`Failed to upload ${word}:`, error);
 					result.errors.push(`Upload "${word}" failed`);
 				}
-			}
+			});
+
+			await pLimit(uploadTasks, concurrency);
 
 			for (const word of needsSync.toDeleteFromCloud) {
 				try {
@@ -434,7 +473,7 @@ export class SyncService {
 		}
 
 		content += `> [!info] Eudic Sync\n`;
-		content += `> This note was created from eudic sync. [🔄 Click here to update dictionary details](obsidian://linkdict/update?word=${encodeURIComponent(word)})\n`;
+		content += `> This note was created from eudic sync. [🔄 Click here to update dictionary details](obsidian://linkdict?action=update&word=${encodeURIComponent(word)})\n`;
 
 		return yaml + content;
 	}
