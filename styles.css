@@ -524,3 +524,22 @@
 	font-size: 0.85em;
 	margin: 0;
 }
+
+.sync-warning-text {
+	color: var(--text-error);
+	font-weight: bold;
+}
+
+.sync-preview-list {
+	margin: 12px 0;
+	padding-left: 20px;
+}
+
+.sync-preview-list li {
+	margin-bottom: 6px;
+}
+
+.sync-total-deletions {
+	font-weight: bold;
+	margin-top: 8px;
+}

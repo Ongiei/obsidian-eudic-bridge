@@ -10,6 +10,7 @@ import {SyncService} from "./sync";
 import {LedgerService} from "./ledger";
 import {AutoLinkService} from "./auto-link";
 import {BatchUpdateService} from "./batch-update";
+import {ConfirmSyncModal} from "./modal";
 import {t, detectLanguage, setLanguage} from "./i18n";
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
@@ -362,6 +363,32 @@ export default class LinkDictPlugin extends Plugin {
 			this.eudicService,
 			this.ledgerService!
 		);
+
+		try {
+			const preview = await this.syncService.previewSync(this.settings.syncDirection);
+
+			if (this.syncService.needsDeleteConfirmation(preview)) {
+				new ConfirmSyncModal(
+					this.app,
+					preview,
+					() => {
+						void this.executeSync();
+					},
+					() => {
+						new Notice(t('notice_syncCancelled'));
+					}
+				).open();
+			} else {
+				await this.executeSync();
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+			new Notice(t('notice_syncFailed', { error: errorMsg }));
+		}
+	}
+
+	private async executeSync(): Promise<void> {
+		if (!this.syncService) return;
 		await this.syncService.sync(this.settings.syncDirection);
 	}
 

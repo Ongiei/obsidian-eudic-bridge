@@ -8,6 +8,13 @@ import { t } from './i18n';
 
 export type SyncDirection = 'to-eudic' | 'from-eudic' | 'bidirectional';
 
+export interface SyncPreview {
+	toUpload: number;
+	toDownload: number;
+	toDeleteFromCloud: number;
+	localFilesToMarkDeleted: number;
+}
+
 export interface SyncResult {
 	success: boolean;
 	uploaded: number;
@@ -19,6 +26,7 @@ export interface SyncResult {
 }
 
 const DELETE_DELAY_MS = 500;
+const DELETE_WARNING_THRESHOLD = 5;
 
 function delay(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
@@ -49,6 +57,53 @@ export class SyncService {
 		this.settings = settings;
 		this.eudicService = eudicService;
 		this.ledger = ledger;
+	}
+
+	async previewSync(direction: SyncDirection): Promise<SyncPreview> {
+		this.ledger.syncLocalFiles(this.settings.folderPath);
+
+		const preview: SyncPreview = {
+			toUpload: 0,
+			toDownload: 0,
+			toDeleteFromCloud: 0,
+			localFilesToMarkDeleted: 0,
+		};
+
+		if (direction === 'to-eudic' || direction === 'bidirectional') {
+			const needsSync = this.ledger.getEntriesNeedingSync();
+			preview.toUpload = needsSync.toUpload.length;
+			preview.toDeleteFromCloud = needsSync.toDeleteFromCloud.length;
+		}
+
+		if (direction === 'from-eudic' || direction === 'bidirectional') {
+			const listId = this.settings.eudicDefaultListId || '0';
+			const allCloudWords: { word: string; exp?: string; id?: string }[] = [];
+			let page = 1;
+			const pageSize = 100;
+
+			while (true) {
+				const words = await this.eudicService.getWords(listId, 'en', page, pageSize);
+				if (words.length === 0) break;
+				for (const w of words) {
+					allCloudWords.push({ word: w.word, exp: w.exp, id: undefined });
+				}
+				if (words.length < pageSize) break;
+				page++;
+			}
+
+			this.ledger.syncCloudWords(allCloudWords);
+
+			const needsSync = this.ledger.getEntriesNeedingSync();
+			preview.toDownload = needsSync.toDownload.length;
+			preview.localFilesToMarkDeleted = needsSync.cloudDeleted.length;
+		}
+
+		return preview;
+	}
+
+	needsDeleteConfirmation(preview: SyncPreview): boolean {
+		return preview.toDeleteFromCloud > DELETE_WARNING_THRESHOLD || 
+			   preview.localFilesToMarkDeleted > DELETE_WARNING_THRESHOLD;
 	}
 
 	async sync(direction: SyncDirection): Promise<SyncResult> {
