@@ -2,7 +2,6 @@ import { App, Notice, TFile } from 'obsidian';
 import { EudicService } from './eudic';
 import { LinkDictSettings } from './settings';
 import { LedgerService } from './ledger';
-import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { getLemma } from './lemmatizer';
 import { t } from './i18n';
@@ -19,7 +18,7 @@ export interface SyncResult {
 	errors: string[];
 }
 
-const API_DELAY_MS = 100;
+const DELETE_DELAY_MS = 500;
 
 function delay(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
@@ -119,7 +118,7 @@ export class SyncService {
 			console.debug(t('sync_fetchingWords'));
 			const listId = this.settings.eudicDefaultListId || '0';
 
-			const allCloudWords: { word: string; id?: string }[] = [];
+			const allCloudWords: { word: string; exp?: string; id?: string }[] = [];
 			let page = 1;
 			const pageSize = 100;
 
@@ -127,7 +126,7 @@ export class SyncService {
 				const words = await this.eudicService.getWords(listId, 'en', page, pageSize);
 				if (words.length === 0) break;
 				for (const w of words) {
-					allCloudWords.push({ word: w.word, id: undefined });
+					allCloudWords.push({ word: w.word, exp: w.exp, id: undefined });
 				}
 				if (words.length < pageSize) break;
 				page++;
@@ -155,19 +154,9 @@ export class SyncService {
 						continue;
 					}
 
-					await delay(API_DELAY_MS);
-
-					const entry = await YoudaoService.lookup(lemma);
-
-					if (entry) {
-						await this.createWordNoteFromSync(lemma, entry);
-						this.ledger.markActive(lemma);
-						result.downloaded++;
-					} else {
-						await this.createWordNoteFromSync(lemma, null, word);
-						this.ledger.markActive(lemma);
-						result.downloaded++;
-					}
+					await this.createWordNoteFromSync(lemma, null, cloudWord.exp || word);
+					this.ledger.markActive(lemma);
+					result.downloaded++;
 				} catch (wordError) {
 					const errorMsg = wordError instanceof Error ? wordError.message : 'Unknown error';
 					console.error(`Failed to sync word "${lemma}":`, errorMsg);
@@ -204,6 +193,7 @@ export class SyncService {
 					await this.eudicService.deleteWords(listId, [word]);
 					this.ledger.deleteEntry(word);
 					result.deleted++;
+					await delay(DELETE_DELAY_MS);
 				} catch (error) {
 					console.error(`Failed to delete ${word} from cloud:`, error);
 					result.errors.push(`Delete "${word}" from cloud failed`);

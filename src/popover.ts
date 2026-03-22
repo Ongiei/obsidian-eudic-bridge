@@ -183,17 +183,6 @@ export class DefinitionPopover {
 		});
 		actionContainer.appendChild(createNoteBtn);
 
-		if (this.plugin.settings.eudicToken) {
-			const addToEudicBtn = document.createElement('button');
-			addToEudicBtn.className = 'dict-action-btn';
-			setIcon(addToEudicBtn, 'plus-circle');
-			setTooltip(addToEudicBtn, t('ui_addToEudic'));
-			addToEudicBtn.addEventListener('click', () => {
-				void this.plugin.addToEudic(this.originalWord);
-			});
-			actionContainer.appendChild(addToEudicBtn);
-		}
-
 		headerContainer.appendChild(actionContainer);
 
 		header.appendChild(headerContainer);

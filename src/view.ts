@@ -66,21 +66,6 @@ export class DictionaryView extends ItemView {
 			}
 		});
 
-		if (this.plugin.settings.eudicToken) {
-			const addToEudicButton = searchBarEl.createEl('button', {
-				cls: 'link-dict-action-btn',
-				attr: { 'aria-label': t('ui_addToEudic') }
-			});
-			setIcon(addToEudicButton, 'plus-circle');
-			setTooltip(addToEudicButton, t('ui_addToEudic'));
-			addToEudicButton.addEventListener('click', () => {
-				const word = this.searchInput.value.trim();
-				if (word) {
-					void this.plugin.addToEudic(word);
-				}
-			});
-		}
-
 		this.resultContainer = contentEl.createEl('div', { cls: 'dict-result-container' });
 
 		this.searchInput.addEventListener('keydown', (event) => {
