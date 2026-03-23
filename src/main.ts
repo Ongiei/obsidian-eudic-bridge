@@ -48,6 +48,20 @@ export default class LinkDictPlugin extends Plugin {
 		await this.loadSettings();
 		this.initLanguage();
 
+		// Expose debug methods to window for CLI access
+		(window as unknown as { 
+			__linkDictPlugin: LinkDictPlugin;
+			__getLinkDictLogs: () => string[];
+		}).__linkDictPlugin = this;
+		(window as unknown as { 
+			__linkDictPlugin: LinkDictPlugin;
+			__getLinkDictLogs: () => string[];
+		}).__getLinkDictLogs = () => {
+			const syncService = this.syncService;
+			if (!syncService) return [];
+			return (syncService as unknown as { getLogs: () => string[] }).getLogs?.() || [];
+		};
+
 		this.registerView(VIEW_TYPE_LINK_DICT, (leaf) => new DictionaryView(leaf, this));
 
 		this.addRibbonIcon('book-open', t('commands_openDictionaryView'), () => {
