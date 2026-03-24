@@ -615,6 +615,11 @@
 	border-left-color: var(--text-warning);
 }
 
+.sync-change-delete-local {
+	background-color: var(--background-secondary);
+	border-left-color: var(--text-warning);
+}
+
 .sync-change-delete-cloud {
 	background-color: var(--background-secondary);
 	border-left-color: var(--text-error);
@@ -636,4 +641,38 @@
 	color: var(--text-error);
 	font-size: 0.9em;
 	margin-top: 4px;
+}
+
+.link-dict-external-changes-modal {
+	padding: 20px;
+	max-width: 600px;
+}
+
+.link-dict-external-changes-modal h2 {
+	margin-bottom: 8px;
+}
+
+.link-dict-external-changes-modal .modal-description {
+	color: var(--text-muted);
+	margin-bottom: 16px;
+}
+
+.external-changes-section {
+	margin-bottom: 20px;
+	padding: 12px;
+	background-color: var(--background-secondary);
+	border-radius: 6px;
+}
+
+.external-changes-section h3 {
+	margin: 0 0 8px 0;
+	font-size: 1em;
+	color: var(--text-normal);
+}
+
+.external-word-list {
+	color: var(--text-muted);
+	font-size: 0.9em;
+	margin-bottom: 12px;
+	word-break: break-word;
 }

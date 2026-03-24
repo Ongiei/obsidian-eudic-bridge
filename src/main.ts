@@ -9,8 +9,9 @@ import {EudicService} from "./eudic";
 import {SyncService} from "./sync";
 import {AutoLinkService} from "./auto-link";
 import {BatchUpdateService, ProgressModal} from "./batch-update";
-import {SyncConfirmationModal} from "./modal";
+import {ExternalChangesModal, SyncConfirmationModal} from "./modal";
 import {t, detectLanguage, setLanguage} from "./i18n";
+import type { ExternalChangesResolution } from "./sync";
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
 
@@ -108,7 +109,9 @@ export default class LinkDictPlugin extends Plugin {
 			this.app,
 			this.settings,
 			this.eudicService,
-			() => this.saveSettings()
+			() => this.saveSettings(),
+			() => this.loadData(),
+			(data) => this.saveData(data)
 		);
 	}
 
@@ -269,11 +272,11 @@ export default class LinkDictPlugin extends Plugin {
 				}
 			})
 		);
-
+		
 		this.registerEvent(
 			this.app.vault.on('delete', (file) => {
 				if (file instanceof TFile && file.extension === 'md') {
-					this.handleFileDeleted(file);
+					void this.handleFileDeleted(file);
 				}
 			})
 		);
@@ -368,10 +371,44 @@ export default class LinkDictPlugin extends Plugin {
 			return;
 		}
 
-		try {
-			new Notice(t('sync_dry_run_running'));
+		// 先显示分析中的提示
+		const notice = new Notice(t('sync_dry_run_running'), 0); // 0 = 不自动消失
 
-			const dryRunResult = await this.syncService.dryRun();
+		try {
+			// Step 1: 检测外部变动
+			const externalChanges = await this.syncService.detectExternalChanges();
+
+			// 隐藏分析中的提示
+			notice.hide();
+
+			if (externalChanges) {
+				// Step 2: 显示外部变动弹窗
+				new ExternalChangesModal(
+					this.app,
+					externalChanges,
+					(resolution: ExternalChangesResolution) => {
+						void this.proceedWithDryRun(resolution);
+					},
+					() => {
+						new Notice(t('notice_syncCancelled'));
+					}
+				).open();
+			} else {
+				// 没有外部变动，直接进入 dryRun
+				void this.proceedWithDryRun();
+			}
+		} catch (error) {
+			notice.hide();
+			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+			new Notice(t('notice_syncFailed', { error: errorMsg }));
+		}
+	}
+
+	private async proceedWithDryRun(resolution?: ExternalChangesResolution): Promise<void> {
+		if (!this.syncService) return;
+
+		try {
+			const dryRunResult = await this.syncService.dryRun(resolution);
 
 			new SyncConfirmationModal(
 				this.app,
@@ -429,9 +466,9 @@ export default class LinkDictPlugin extends Plugin {
 		await this.syncService.handleFileCreated(file);
 	}
 
-	private handleFileDeleted(file: TFile): void {
+	private async handleFileDeleted(file: TFile): Promise<void> {
 		if (!this.syncService) return;
-		this.syncService.handleFileDeleted(file);
+		await this.syncService.handleFileDeleted(file);
 	}
 
 	async loadSettings(): Promise<void> {

@@ -19,12 +19,8 @@ export interface LinkDictSettings {
 	language: string;
 	autoLinkFirstOnly: boolean;
 	autoAddToEudic: boolean;
-	batchChunkSize: number;
-	batchDelayMs: number;
 	dictionarySource: DictionarySource;
-	syncConcurrency: number;
 	apiDelayMs: number;
-	pendingDeletes: string[];
 }
 
 export const DEFAULT_SETTINGS: LinkDictSettings = {
@@ -42,12 +38,8 @@ export const DEFAULT_SETTINGS: LinkDictSettings = {
 	language: 'auto',
 	autoLinkFirstOnly: true,
 	autoAddToEudic: true,
-	batchChunkSize: 20,
-	batchDelayMs: 10000,
 	dictionarySource: 'eudic',
-	syncConcurrency: 3,
 	apiDelayMs: 200,
-	pendingDeletes: [],
 };
 
 export class LinkDictSettingTab extends PluginSettingTab {
@@ -317,51 +309,15 @@ export class LinkDictSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName(t('settings_batchSettings'))
-			.setHeading();
-
-		new Setting(containerEl)
-			.setName(t('settings_syncConcurrency'))
-			.setDesc(t('settings_syncConcurrencyDesc'))
+			.setName(t('settings_apiDelay'))
+			.setDesc(t('settings_apiDelayDesc'))
 			.addText((text) => {
 				text
-					.setValue(String(this.plugin.settings.syncConcurrency))
+					.setValue(String(this.plugin.settings.apiDelayMs))
 					.onChange(async (value) => {
 						const num = parseInt(value, 10);
-						if (!isNaN(num) && num >= 1 && num <= 10) {
-							this.plugin.settings.syncConcurrency = num;
-							await this.plugin.saveSettings();
-						}
-					});
-				text.inputEl.type = 'number';
-			});
-
-		new Setting(containerEl)
-			.setName(t('settings_batchChunkSize'))
-			.setDesc(t('settings_batchChunkSizeDesc'))
-			.addText((text) => {
-				text
-					.setValue(String(this.plugin.settings.batchChunkSize))
-					.onChange(async (value) => {
-						const num = parseInt(value, 10);
-						if (!isNaN(num) && num >= 1 && num <= 100) {
-							this.plugin.settings.batchChunkSize = num;
-							await this.plugin.saveSettings();
-						}
-					});
-				text.inputEl.type = 'number';
-			});
-
-		new Setting(containerEl)
-			.setName(t('settings_batchDelay'))
-			.setDesc(t('settings_batchDelayDesc'))
-			.addText((text) => {
-				text
-					.setValue(String(this.plugin.settings.batchDelayMs / 1000))
-					.onChange(async (value) => {
-						const num = parseInt(value, 10);
-						if (!isNaN(num) && num >= 1) {
-							this.plugin.settings.batchDelayMs = num * 1000;
+						if (!isNaN(num) && num >= 0) {
+							this.plugin.settings.apiDelayMs = num;
 							await this.plugin.saveSettings();
 						}
 					});

@@ -115,8 +115,17 @@ export class EudicService {
 			throw new Error(`Failed to delete words: ${response.status} - ${response.text}`);
 		}
 
-		const data = response.json as EudicAddWordsResponse;
-		return data.message;
+		// Handle empty response (204 No Content or empty body)
+		if (!response.text || response.text.trim() === '') {
+			return 'success';
+		}
+
+		try {
+			const data = response.json as EudicAddWordsResponse;
+			return data.message || 'success';
+		} catch {
+			return 'success';
+		}
 	}
 
 	static validateToken(token: string): boolean {

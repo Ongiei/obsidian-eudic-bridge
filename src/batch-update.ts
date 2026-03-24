@@ -3,13 +3,19 @@ import { LinkDictSettings } from './settings';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
 import { t } from './i18n';
-import type { Frontmatter } from './sync';
 
 export interface BatchUpdateResult {
 	total: number;
 	updated: number;
 	skipped: number;
 	failed: number;
+}
+
+interface LocalFrontmatter {
+	tags?: string[];
+	aliases?: string[];
+	dict_source?: string;
+	[key: string]: unknown;
 }
 
 export class ProgressModal extends Modal {
@@ -196,36 +202,32 @@ export class BatchUpdateService {
 	private async updateFileSafely(file: TFile): Promise<boolean> {
 		const word = file.basename;
 
-		// Read current content
 		const content = await this.app.vault.read(file);
 		const fm = this.parseFrontmatter(content);
 
-		// Skip already updated files
 		if (fm?.dict_source === 'youdao') {
 			return false;
 		}
 
-		// Fetch definition
 		const entry = await YoudaoService.lookup(word);
 		if (!entry) {
 			return false;
 		}
 
-		// Use vault.process for atomic write
 		const newContent = this.generateFullMarkdown(word, entry);
 		await this.app.vault.process(file, () => newContent);
 
 		return true;
 	}
 
-	private parseFrontmatter(content: string): Frontmatter | null {
+	private parseFrontmatter(content: string): LocalFrontmatter | null {
 		const match = content.match(/^---\n([\s\S]*?)\n---/);
 		if (!match || !match[1]) {
 			return null;
 		}
 
 		try {
-			return parseYaml(match[1]) as Frontmatter;
+			return parseYaml(match[1]) as LocalFrontmatter;
 		} catch {
 			return null;
 		}
@@ -243,22 +245,17 @@ export class BatchUpdateService {
 		const files: TFile[] = [];
 		const children = folder.children;
 
-		// Process files sequentially to avoid file lock issues
 		for (const child of children) {
 			if (child instanceof TFile && child.extension === 'md') {
 				try {
 					const content = await this.app.vault.read(child);
 					const fm = this.parseFrontmatter(content);
 
-					// Skip already updated files
 					if (fm?.dict_source === 'youdao') {
 						continue;
 					}
 
-					// Check if file needs update
-					if (content.includes('eudic_synced: true') ||
-						content.includes('eudic_synced:True') ||
-						content.includes('[!info] Eudic Sync')) {
+					if (fm?.dict_source === 'eudic' || content.includes('[!info] Eudic Sync')) {
 						files.push(child);
 					}
 				} catch (readErr) {
@@ -295,9 +292,8 @@ export class BatchUpdateService {
 
 		const uniqueAliases = [...new Set(aliases)].filter(a => a && a.trim() !== '');
 
-		const frontmatter: Frontmatter = {
+		const frontmatter: LocalFrontmatter = {
 			tags: uniqueTags,
-			eudic_synced: true,
 			dict_source: 'youdao',
 		};
 
