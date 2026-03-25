@@ -104,7 +104,7 @@ export class LinkDictSettingTab extends PluginSettingTab {
 		this.renderAdvancedSection(containerEl);
 
 		if (this.plugin.settings.eudicToken) {
-			this.loadCategories();
+			void this.loadCategories();
 		}
 	}
 
@@ -233,7 +233,7 @@ export class LinkDictSettingTab extends PluginSettingTab {
 					const label = categoryContainer.createEl('label', {cls: 'linkdict-checkbox-label'});
 					const checkbox = label.createEl('input', {type: 'checkbox'});
 					checkbox.checked = isChecked;
-					checkbox.addEventListener('change', async () => {
+					checkbox.addEventListener('change', () => {
 						if (checkbox.checked) {
 							if (!this.plugin.settings.syncCategoryIds.includes(cat.id)) {
 								this.plugin.settings.syncCategoryIds.push(cat.id);
@@ -241,7 +241,7 @@ export class LinkDictSettingTab extends PluginSettingTab {
 						} else {
 							this.plugin.settings.syncCategoryIds = this.plugin.settings.syncCategoryIds.filter(id => id !== cat.id);
 						}
-						await this.plugin.saveSettings();
+						void this.plugin.saveSettings();
 					});
 					label.createSpan({text: cat.name});
 				}
@@ -377,8 +377,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 						new ConfirmModal(
 							this.app,
 							t('settings_clearManifestDesc'),
-							async () => {
-								await this.plugin.saveData({ syncManifest: { lastSyncTime: '', syncedWords: [] } });
+							() => {
+								void this.plugin.saveData({ syncManifest: { lastSyncTime: '', syncedWords: [] } });
 								new Notice(t('settings_clearManifestConfirm'));
 							}
 						).open();
@@ -396,9 +396,9 @@ export class LinkDictSettingTab extends PluginSettingTab {
 						new ConfirmModal(
 							this.app,
 							t('settings_resetPluginDesc'),
-							async () => {
+							() => {
 								this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
-								await this.plugin.saveSettings();
+								void this.plugin.saveSettings();
 								this.display();
 								new Notice(t('settings_resetPluginConfirm'));
 							}

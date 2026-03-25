@@ -19,19 +19,19 @@ export class ProgressNoticeWidget {
 
 	constructor(type: 'sync' | 'update', total: number, onAbort: () => void) {
 		this.notice = new Notice('', 0);
-		this.notice.noticeEl.addClass('linkdict-progress-notice');
-		this.notice.noticeEl.empty();
+		this.notice.messageEl.addClass('linkdict-progress-notice');
+		this.notice.messageEl.empty();
 
-		this.titleEl = this.notice.noticeEl.createEl('div', { cls: 'linkdict-notice-title' });
+		this.titleEl = this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-title' });
 		this.titleEl.textContent = type === 'sync' ? t('notice_syncing') : t('notice_updating');
 
-		this.wordEl = this.notice.noticeEl.createEl('div', { cls: 'linkdict-notice-word' });
+		this.wordEl = this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-word' });
 
-		this.progressBar = this.notice.noticeEl.createEl('progress', { cls: 'linkdict-notice-progress' });
+		this.progressBar = this.notice.messageEl.createEl('progress', { cls: 'linkdict-notice-progress' });
 		this.progressBar.value = 0;
 		this.progressBar.max = total;
 
-		this.abortBtn = this.notice.noticeEl.createEl('button', { cls: 'linkdict-notice-abort mod-warning' });
+		this.abortBtn = this.notice.messageEl.createEl('button', { cls: 'linkdict-notice-abort mod-warning' });
 		this.abortBtn.textContent = t('notice_abort');
 		this.abortBtn.onclick = () => {
 			this.isAborted = true;
@@ -52,17 +52,17 @@ export class ProgressNoticeWidget {
 	}
 
 	setAborted(count: number): void {
-		this.notice.noticeEl.empty();
-		this.notice.noticeEl.addClass('linkdict-notice-complete');
-		this.notice.noticeEl.createEl('div', { cls: 'linkdict-notice-result' })
+		this.notice.messageEl.empty();
+		this.notice.messageEl.addClass('linkdict-notice-complete');
+		this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-result' })
 			.textContent = t('notice_aborted', { count });
 		setTimeout(() => this.hide(), 3000);
 	}
 
 	setComplete(uploaded: number, downloaded: number): void {
-		this.notice.noticeEl.empty();
-		this.notice.noticeEl.addClass('linkdict-notice-complete');
-		this.notice.noticeEl.createEl('div', { cls: 'linkdict-notice-result' })
+		this.notice.messageEl.empty();
+		this.notice.messageEl.addClass('linkdict-notice-complete');
+		this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-result' })
 			.textContent = t('notice_syncCompletedWithStats', { uploaded, downloaded });
 		setTimeout(() => this.hide(), 3000);
 	}

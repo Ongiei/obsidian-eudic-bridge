@@ -1,4 +1,4 @@
-import {Editor, MarkdownView, Menu, Notice, Plugin, TFile, TFolder, WorkspaceLeaf} from 'obsidian';
+import {Editor, MarkdownView, Menu, Notice, Plugin, TFile, WorkspaceLeaf} from 'obsidian';
 import {DEFAULT_SETTINGS, LinkDictSettings, LinkDictSettingTab} from "./settings";
 import {DictionaryView} from "./view";
 import {DefinitionPopover} from "./popover";
@@ -115,9 +115,9 @@ export default class LinkDictPlugin extends Plugin {
 		});
 
 		this.autoLinkRibbonIcon = this.addRibbonIcon('link', t('commands_autoLinkDocument'), () => {
-			const activeLeaf = this.app.workspace.activeLeaf;
-			if (activeLeaf && activeLeaf.view instanceof MarkdownView) {
-				const editor = activeLeaf.view.editor;
+			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+			if (view) {
+				const editor = view.editor;
 				void this.autoLinkDocument(editor);
 			} else {
 				new Notice(t('notice_pleaseOpenMarkdown'));
@@ -510,7 +510,7 @@ export default class LinkDictPlugin extends Plugin {
 
 		const { entry, word: lemma } = result;
 
-		const isNewFile = await this.createWordFile(lemma, entry, searchWord);
+		await this.createWordFile(lemma, entry, searchWord);
 
 		if (editor) {
 			const selectedText = editor.getSelection();

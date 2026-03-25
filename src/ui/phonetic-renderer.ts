@@ -12,8 +12,9 @@ export function renderPhoneticButtons(container: HTMLElement, entry: DictEntry):
 		ukPhoneticBtn.className = 'dict-phonetic-btn';
 		ukPhoneticBtn.textContent = `${t('view_uk')} /${entry.ph_uk}/`;
 		if (entry.audio_uk) {
+			const audioUrl = entry.audio_uk;
 			ukPhoneticBtn.addEventListener('click', () => {
-				void new Audio(entry.audio_uk!).play();
+				void new Audio(audioUrl).play();
 			});
 		}
 		phoneticContainer.appendChild(ukPhoneticBtn);
@@ -24,8 +25,9 @@ export function renderPhoneticButtons(container: HTMLElement, entry: DictEntry):
 		usPhoneticBtn.className = 'dict-phonetic-btn';
 		usPhoneticBtn.textContent = `${t('view_us')} /${entry.ph_us}/`;
 		if (entry.audio_us) {
+			const audioUrl = entry.audio_us;
 			usPhoneticBtn.addEventListener('click', () => {
-				void new Audio(entry.audio_us!).play();
+				void new Audio(audioUrl).play();
 			});
 		}
 		phoneticContainer.appendChild(usPhoneticBtn);

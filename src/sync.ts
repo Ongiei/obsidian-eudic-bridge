@@ -1,5 +1,5 @@
 import { App, TFile, TFolder, stringifyYaml } from 'obsidian';
-import { EudicService, EudicWord, EudicCategory } from './eudic';
+import { EudicService, EudicWord } from './eudic';
 import { LinkDictSettings } from './settings';
 import { t } from './i18n';
 
@@ -60,7 +60,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, operation: string
 			})
 			.catch(err => {
 				clearTimeout(timer);
-				reject(err);
+				reject(err instanceof Error ? err : new Error(String(err)));
 			});
 	});
 }
@@ -188,7 +188,7 @@ export class SyncService {
 		}
 
 		this.cloudWordsWithCategories = data;
-		console.log(`[LinkDict] Fetched ${data.size} unique words from ${categoryIds.length} categories`);
+		console.debug(`[LinkDict] Fetched ${data.size} unique words from ${categoryIds.length} categories`);
 		return data;
 	}
 
@@ -206,16 +206,12 @@ export class SyncService {
 				const cache = this.app.metadataCache.getFileCache(child);
 				const fm = cache?.frontmatter;
 
-				const tags = fm?.tags;
+				const tags = fm?.tags as string[] | undefined;
 				if (Array.isArray(tags) && tags.includes('linkdict/cloud-deleted')) {
 					continue;
 				}
 
-				let realWord: string | undefined = fm?.word;
-				
-				if (!realWord) {
-					realWord = child.basename;
-				}
+				const realWord = (fm?.word as string | undefined) || child.basename;
 
 				const wordLower = realWord.toLowerCase();
 				words.add(wordLower);
@@ -223,7 +219,7 @@ export class SyncService {
 			}
 		}
 
-		console.log(`[LinkDict] Found ${words.size} local words`);
+		console.debug(`[LinkDict] Found ${words.size} local words`);
 		return words;
 	}
 
@@ -391,7 +387,7 @@ export class SyncService {
 
 		if (file) {
 			const cache = this.app.metadataCache.getFileCache(file);
-			const eudicLists = cache?.frontmatter?.eudic_lists;
+			const eudicLists = cache?.frontmatter?.eudic_lists as string[] | undefined;
 
 			if (Array.isArray(eudicLists) && eudicLists.length > 0) {
 				await this.loadCategoryMapping();
@@ -449,7 +445,7 @@ export class SyncService {
 		const file = this.getLocalFileByWord(word);
 
 		if (file instanceof TFile) {
-			await this.app.vault.trash(file, false);
+			await this.app.fileManager.trashFile(file);
 		} else {
 			console.warn(`[LinkDict] File not found for trashing: ${word}`);
 		}
@@ -508,7 +504,7 @@ export class SyncService {
 		if (!file.path.startsWith(this.settings.folderPath)) return;
 
 		const cache = this.app.metadataCache.getFileCache(file);
-		const realWord = cache?.frontmatter?.word || file.basename;
+		const realWord = (cache?.frontmatter?.word as string | undefined) || file.basename;
 		const wordLower = realWord.toLowerCase();
 
 		if (!wordLower) return;

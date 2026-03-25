@@ -2,7 +2,6 @@ import { App, TFile, TFolder, parseYaml } from 'obsidian';
 import { LinkDictSettings } from './settings';
 import { YoudaoService } from './youdao';
 import { DictEntry } from './types';
-import { t } from './i18n';
 import { MarkdownGenerator } from './utils/markdown-generator';
 import { BatchUpdateModal, BatchUpdateStats, ProgressNoticeWidget } from './modal';
 
@@ -73,7 +72,7 @@ export class BatchUpdateService {
 		const stats: BatchUpdateStats = { total: 0, updated: 0, pending: 0 };
 
 		if (!(folder instanceof TFolder)) {
-			console.log(`[BatchUpdate] Folder not found: ${folderPath}`);
+			console.debug(`[BatchUpdate] Folder not found: ${folderPath}`);
 			return stats;
 		}
 
@@ -120,7 +119,7 @@ export class BatchUpdateService {
 			for (const file of filesNeedingUpdate) {
 				if (this.shouldStop || this.progressNotice?.isAbortedByUser()) {
 					this.progressNotice?.setAborted(result.updated);
-					console.log(`[BatchUpdate] Aborted. Updated: ${result.updated}`);
+					console.debug(`[BatchUpdate] Aborted. Updated: ${result.updated}`);
 					this.isRunning = false;
 					this.progressNotice = null;
 					onComplete(result);
@@ -129,14 +128,14 @@ export class BatchUpdateService {
 
 				current++;
 				const cache = this.app.metadataCache.getFileCache(file);
-				const word = cache?.frontmatter?.word || file.basename;
+				const word = (cache?.frontmatter?.word as string | undefined) || file.basename;
 				this.progressNotice?.update(current, totalPending, word);
 
 				try {
 					const didUpdate = await this.updateFileSafely(file);
 					if (didUpdate) {
 						result.updated++;
-						console.log(`[BatchUpdate] Updated "${word}" (${current}/${totalPending})`);
+						console.debug(`[BatchUpdate] Updated "${word}" (${current}/${totalPending})`);
 					} else {
 						result.skipped++;
 					}
@@ -150,7 +149,7 @@ export class BatchUpdateService {
 			}
 
 			this.progressNotice?.setComplete(result.updated, result.failed);
-			console.log(`[BatchUpdate] Complete. Updated: ${result.updated}, Failed: ${result.failed}`);
+			console.debug(`[BatchUpdate] Complete. Updated: ${result.updated}, Failed: ${result.failed}`);
 		} catch (error) {
 			const errMsg = error instanceof Error ? error.message : String(error);
 			console.error('[BatchUpdate] Fatal error:', errMsg);
@@ -171,7 +170,7 @@ export class BatchUpdateService {
 		const cache = this.app.metadataCache.getFileCache(file);
 		const fm = cache?.frontmatter;
 
-		let word = fm?.word || file.basename;
+		const word = (fm?.word as string | undefined) || file.basename;
 
 		const content = await this.app.vault.read(file);
 		const parsedFm = this.parseFrontmatter(content);
@@ -224,7 +223,7 @@ export class BatchUpdateService {
 		const folder = this.app.vault.getAbstractFileByPath(folderPath);
 
 		if (!(folder instanceof TFolder)) {
-			console.log(`[BatchUpdate] Folder not found: ${folderPath}`);
+			console.debug(`[BatchUpdate] Folder not found: ${folderPath}`);
 			return [];
 		}
 
@@ -277,7 +276,7 @@ export class BatchUpdateService {
 					for (const child of folder.children) {
 						if (child instanceof TFile && child.extension === 'md') {
 							const cache = this.app.metadataCache.getFileCache(child);
-							const fmWord = cache?.frontmatter?.word;
+							const fmWord = cache?.frontmatter?.word as string | undefined;
 							if (fmWord && fmWord.toLowerCase() === word.toLowerCase()) {
 								file = child;
 								break;
@@ -288,7 +287,7 @@ export class BatchUpdateService {
 			}
 
 			if (!file) {
-				console.log(`[BatchUpdate] File not found for word: ${word}`);
+				console.debug(`[BatchUpdate] File not found for word: ${word}`);
 				return false;
 			}
 
