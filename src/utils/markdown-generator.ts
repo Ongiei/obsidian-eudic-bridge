@@ -1,6 +1,5 @@
 import { stringifyYaml } from 'obsidian';
 import { DictEntry } from '../types';
-import { t } from '../i18n';
 
 export interface MarkdownGenerateOptions {
 	saveTags: boolean;
@@ -54,18 +53,18 @@ export class MarkdownGenerator {
 		content += `# ${word}\n\n`;
 
 		if (entry.ph_uk || entry.ph_us) {
-			content += `## ${t('view_pronunciation')}\n\n`;
+			content += `## 发音\n\n`;
 			if (entry.ph_uk) {
-				content += `- ${t('view_uk')}: \`/${entry.ph_uk}/\`\n`;
+				content += `- 英: \`/${entry.ph_uk}/\`\n`;
 			}
 			if (entry.ph_us) {
-				content += `- ${t('view_us')}: \`/${entry.ph_us}/\`\n`;
+				content += `- 美: \`/${entry.ph_us}/\`\n`;
 			}
 			content += '\n';
 		}
 
 		if (entry.definitions.length > 0) {
-			content += `## ${t('view_definitions')}\n\n`;
+			content += `## 释义\n\n`;
 			for (const def of entry.definitions) {
 				const escapedTrans = def.trans.replace(/\[/g, '\\[');
 				if (def.pos) {
@@ -78,7 +77,7 @@ export class MarkdownGenerator {
 		}
 
 		if (entry.webTrans && entry.webTrans.length > 0) {
-			content += `## ${t('view_webTranslations')}\n\n`;
+			content += `## 网络翻译\n\n`;
 			for (const item of entry.webTrans) {
 				const numberedValues = item.value.map((v, i) => `${i + 1}. ${v}`).join(' ');
 				content += `- **${item.key}**: ${numberedValues}\n`;
@@ -87,7 +86,7 @@ export class MarkdownGenerator {
 		}
 
 		if (entry.bilingualExamples && entry.bilingualExamples.length > 0) {
-			content += `## ${t('view_examples')}\n\n`;
+			content += `## 例句\n\n`;
 			for (const example of entry.bilingualExamples) {
 				content += `- ${example.eng}\n`;
 				content += `  - ${example.chn}\n`;
@@ -96,7 +95,7 @@ export class MarkdownGenerator {
 		}
 
 		if (entry.exchange.length > 0) {
-			content += `## ${t('view_wordForms')}\n\n`;
+			content += `## 词形变化\n\n`;
 			for (const item of entry.exchange) {
 				content += `- ${item.name}: ${item.value}\n`;
 			}

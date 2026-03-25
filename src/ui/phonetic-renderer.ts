@@ -1,5 +1,4 @@
 import { DictEntry } from '../types';
-import { t } from '../i18n';
 
 export function renderPhoneticButtons(container: HTMLElement, entry: DictEntry): void {
 	if (!entry.ph_uk && !entry.ph_us) return;
@@ -10,7 +9,7 @@ export function renderPhoneticButtons(container: HTMLElement, entry: DictEntry):
 	if (entry.ph_uk) {
 		const ukPhoneticBtn = document.createElement('div');
 		ukPhoneticBtn.className = 'dict-phonetic-btn';
-		ukPhoneticBtn.textContent = `${t('view_uk')} /${entry.ph_uk}/`;
+		ukPhoneticBtn.textContent = `英 /${entry.ph_uk}/`;
 		if (entry.audio_uk) {
 			const audioUrl = entry.audio_uk;
 			ukPhoneticBtn.addEventListener('click', () => {
@@ -23,7 +22,7 @@ export function renderPhoneticButtons(container: HTMLElement, entry: DictEntry):
 	if (entry.ph_us) {
 		const usPhoneticBtn = document.createElement('div');
 		usPhoneticBtn.className = 'dict-phonetic-btn';
-		usPhoneticBtn.textContent = `${t('view_us')} /${entry.ph_us}/`;
+		usPhoneticBtn.textContent = `美 /${entry.ph_us}/`;
 		if (entry.audio_us) {
 			const audioUrl = entry.audio_us;
 			usPhoneticBtn.addEventListener('click', () => {

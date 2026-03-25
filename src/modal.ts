@@ -1,6 +1,5 @@
 import { App, Modal, Setting } from 'obsidian';
 import { Notice } from 'obsidian';
-import { t } from './i18n';
 
 export interface BatchUpdateStats {
 	total: number;
@@ -23,7 +22,7 @@ export class ProgressNoticeWidget {
 		this.notice.messageEl.empty();
 
 		this.titleEl = this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-title' });
-		this.titleEl.textContent = type === 'sync' ? t('notice_syncing') : t('notice_updating');
+		this.titleEl.textContent = type === 'sync' ? 'LinkDict 正在同步...' : 'LinkDict 正在更新...';
 
 		this.wordEl = this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-word' });
 
@@ -32,10 +31,10 @@ export class ProgressNoticeWidget {
 		this.progressBar.max = total;
 
 		this.abortBtn = this.notice.messageEl.createEl('button', { cls: 'linkdict-notice-abort mod-warning' });
-		this.abortBtn.textContent = t('notice_abort');
+		this.abortBtn.textContent = '停止';
 		this.abortBtn.onclick = () => {
 			this.isAborted = true;
-			this.abortBtn.textContent = t('notice_aborting');
+			this.abortBtn.textContent = '正在停止...';
 			this.abortBtn.disabled = true;
 			onAbort();
 		};
@@ -44,7 +43,7 @@ export class ProgressNoticeWidget {
 	update(current: number, total: number, word: string): void {
 		this.progressBar.value = current;
 		this.progressBar.max = total;
-		this.wordEl.textContent = t('notice_wordProgress', { word, current, total });
+		this.wordEl.textContent = `${word} (${current}/${total})`;
 	}
 
 	isAbortedByUser(): boolean {
@@ -55,7 +54,7 @@ export class ProgressNoticeWidget {
 		this.notice.messageEl.empty();
 		this.notice.messageEl.addClass('linkdict-notice-complete');
 		this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-result' })
-			.textContent = t('notice_aborted', { count });
+			.textContent = `同步已中止。成功更新 ${count} 个词。`;
 		setTimeout(() => this.hide(), 3000);
 	}
 
@@ -63,7 +62,7 @@ export class ProgressNoticeWidget {
 		this.notice.messageEl.empty();
 		this.notice.messageEl.addClass('linkdict-notice-complete');
 		this.notice.messageEl.createEl('div', { cls: 'linkdict-notice-result' })
-			.textContent = t('notice_syncCompletedWithStats', { uploaded, downloaded });
+			.textContent = `同步完成。上传：${uploaded}，下载：${downloaded}`;
 		setTimeout(() => this.hide(), 3000);
 	}
 
@@ -101,35 +100,35 @@ export class BatchUpdateModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass('linkdict-modal-container', 'linkdict-batch-update-modal');
 
-		contentEl.createEl('h2', { text: t('batch_title') });
+		contentEl.createEl('h2', { text: '批量更新释义' });
 
 		const statsGrid = contentEl.createEl('div', { cls: 'linkdict-stats-grid' });
 
 		const totalCard = statsGrid.createEl('div', { cls: 'linkdict-stat-card' });
 		totalCard.createEl('div', { cls: 'linkdict-stat-value', text: String(this.stats.total) });
-		totalCard.createEl('div', { cls: 'linkdict-stat-label', text: t('batch_totalWords') });
+		totalCard.createEl('div', { cls: 'linkdict-stat-label', text: '总单词数' });
 
 		const updatedCard = statsGrid.createEl('div', { cls: 'linkdict-stat-card linkdict-stat-success' });
 		updatedCard.createEl('div', { cls: 'linkdict-stat-value', text: String(this.stats.updated) });
-		updatedCard.createEl('div', { cls: 'linkdict-stat-label', text: `✅ ${t('batch_updated')}` });
+		updatedCard.createEl('div', { cls: 'linkdict-stat-label', text: '已更新详尽释义' });
 
 		const pendingCard = statsGrid.createEl('div', { cls: 'linkdict-stat-card linkdict-stat-warning' });
 		pendingCard.createEl('div', { cls: 'linkdict-stat-value', text: String(this.stats.pending) });
-		pendingCard.createEl('div', { cls: 'linkdict-stat-label', text: `⏳ ${t('batch_pending')}` });
+		pendingCard.createEl('div', { cls: 'linkdict-stat-label', text: '待更新基础释义' });
 
 		if (this.stats.pending === 0) {
-			contentEl.createEl('p', { text: t('batch_noPending'), cls: 'linkdict-no-pending' });
+			contentEl.createEl('p', { text: '没有需要更新的单词', cls: 'linkdict-no-pending' });
 			new Setting(contentEl)
 				.addButton((btn) => {
 					btn
-						.setButtonText(t('progress_close'))
+						.setButtonText('关闭')
 						.onClick(() => this.close());
 				});
 		} else {
 			new Setting(contentEl)
 				.addButton((btn) => {
 					btn
-						.setButtonText(t('batch_startUpdate'))
+						.setButtonText('开始批量更新')
 						.setCta()
 						.onClick(() => {
 							this.close();
@@ -138,7 +137,7 @@ export class BatchUpdateModal extends Modal {
 				})
 				.addButton((btn) => {
 					btn
-						.setButtonText(t('confirm_cancel'))
+						.setButtonText('取消')
 						.onClick(() => this.close());
 				});
 		}

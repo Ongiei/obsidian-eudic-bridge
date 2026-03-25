@@ -1,7 +1,6 @@
 import { App, TFile, TFolder, stringifyYaml } from 'obsidian';
 import { EudicService, EudicWord } from './eudic';
 import { LinkDictSettings } from './settings';
-import { t } from './i18n';
 
 const MANIFEST_KEY = 'syncManifest';
 const API_TIMEOUT_MS = 30000;
@@ -461,17 +460,17 @@ export class SyncService {
 
 		let md = `---\n${stringifyYaml(fm)}---\n\n`;
 		md += `# ${originalWord}\n\n`;
-		md += `## ${t('view_definitions')}\n\n`;
+		md += `## 释义\n\n`;
 		md += this.formatExp(exp);
 		md += `\n`;
-		md += `> [!info] ${t('sync_eudicSync')}\n`;
-		md += `> [🔄 ${t('sync_clickToUpdate')}](obsidian://linkdict?cmd=update&word=${encodeURIComponent(originalWord)})\n`;
+		md += `> [!info] 欧路同步\n`;
+		md += `> [🔄 点击从在线词典更新释义](obsidian://linkdict?cmd=update&word=${encodeURIComponent(originalWord)})\n`;
 
 		return md;
 	}
 
 	private formatExp(exp: string): string {
-		if (!exp) return `*${t('sync_definitionPending')}*\n`;
+		if (!exp) return `*释义待更新*\n`;
 
 		let text = exp;
 
@@ -487,7 +486,7 @@ export class SyncService {
 
 		const lines = text.split('\n').map(l => l.trim()).filter(l => l);
 
-		if (lines.length === 0) return `*${t('sync_definitionPending')}*\n`;
+		if (lines.length === 0) return `*释义待更新*\n`;
 
 		return lines.map(l => l.startsWith('- ') ? l : `- ${l}`).join('\n') + '\n';
 	}

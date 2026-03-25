@@ -1,7 +1,6 @@
 import {Editor, setIcon, setTooltip} from 'obsidian';
 import LinkDictPlugin from './main';
 import {DictEntry, EditorWithCM} from './types';
-import {t} from './i18n';
 import {renderPhoneticButtons} from './ui/phonetic-renderer';
 
 export class DefinitionPopover {
@@ -118,7 +117,7 @@ export class DefinitionPopover {
 		if (!this.entry) {
 			const loading = document.createElement('div');
 			loading.className = 'popover-loading';
-			loading.textContent = t('ui_loading');
+			loading.textContent = '加载中...';
 			this.overlay.appendChild(loading);
 			return;
 		}
@@ -149,7 +148,7 @@ export class DefinitionPopover {
 		const createNoteBtn = document.createElement('button');
 		createNoteBtn.className = 'dict-action-btn';
 		setIcon(createNoteBtn, 'file-plus');
-		setTooltip(createNoteBtn, t('ui_createLemmaNote'));
+		setTooltip(createNoteBtn, '创建词元笔记');
 		createNoteBtn.addEventListener('click', () => {
 			void (async () => {
 				await this.plugin.searchAndGenerateNote(this.originalWord);

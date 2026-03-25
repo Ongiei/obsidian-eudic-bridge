@@ -1,6 +1,5 @@
 import {AbstractInputSuggest, App, Notice, PluginSettingTab, Setting, TAbstractFile, TFolder, Modal} from "obsidian";
 import LinkDictPlugin from "./main";
-import {t, setLanguage, detectLanguage} from "./i18n";
 import {EudicService, EudicCategory} from "./eudic";
 
 export type DictionarySource = 'eudic' | 'youdao';
@@ -20,7 +19,6 @@ export interface LinkDictSettings {
 	autoLinkFirstOnly: boolean;
 	dictionarySource: DictionarySource;
 	apiDelayMs: number;
-	language: string;
 }
 
 export const DEFAULT_SETTINGS: LinkDictSettings = {
@@ -38,7 +36,6 @@ export const DEFAULT_SETTINGS: LinkDictSettings = {
 	autoLinkFirstOnly: true,
 	dictionarySource: 'youdao',
 	apiDelayMs: 500,
-	language: 'auto',
 };
 
 class ConfirmModal extends Modal {
@@ -61,11 +58,11 @@ class ConfirmModal extends Modal {
 		const btnContainer = contentEl.createEl('div', {cls: 'linkdict-confirm-buttons'});
 
 		const confirmBtn = btnContainer.createEl('button', {cls: 'mod-warning'});
-		confirmBtn.textContent = t('confirm_dangerous');
+		confirmBtn.textContent = '执行';
 		confirmBtn.onclick = () => {
 			if (!this.isConfirmState) {
 				this.isConfirmState = true;
-				confirmBtn.textContent = t('confirm_dangerous_confirm');
+				confirmBtn.textContent = '再次确认执行';
 				confirmBtn.addClass('mod-danger');
 			} else {
 				this.close();
@@ -74,7 +71,7 @@ class ConfirmModal extends Modal {
 		};
 
 		const cancelBtn = btnContainer.createEl('button');
-		cancelBtn.textContent = t('confirm_cancel');
+		cancelBtn.textContent = '取消';
 		cancelBtn.onclick = () => this.close();
 	}
 
@@ -123,21 +120,21 @@ export class LinkDictSettingTab extends PluginSettingTab {
 
 	private renderDictionarySection(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName(t('settings_sectionDictionary'))
+			.setName('查词与本地笔记')
 			.setHeading();
 
 		new Setting(containerEl)
-			.setName(t('settings_wordStorageFolder'))
-			.setDesc(t('settings_wordStorageFolderDesc'))
+			.setName('单词存储文件夹')
+			.setDesc('保存单词笔记的文件夹')
 			.addText((text) => {
 				new FolderSuggest(this.app, text.inputEl);
 				text
-					.setPlaceholder(t('ui_inputWord'))
+					.setPlaceholder('输入单词...')
 					.setValue(this.plugin.settings.folderPath)
 					.onChange(async (value) => {
 						const sanitized = value.replace(/\.\./g, '').replace(/^\/+/, '');
 						if (sanitized !== value) {
-							new Notice(t('settings_pathSanitized'));
+							new Notice('路径包含非法字符，已自动清理');
 						}
 						this.plugin.settings.folderPath = sanitized || 'LinkDict';
 						await this.plugin.saveSettings();
@@ -145,11 +142,11 @@ export class LinkDictSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName(t('settings_dictionarySource'))
-			.setDesc(t('settings_dictionarySourceDesc'))
+			.setName('词典数据源')
+			.setDesc('创建笔记和批量更新释义时使用的词典')
 			.addDropdown((dropdown) => {
 				dropdown
-					.addOption('youdao', t('settings_sourceYoudao'))
+					.addOption('youdao', '有道词典')
 					.setValue(this.plugin.settings.dictionarySource)
 					.onChange(async (value) => {
 						this.plugin.settings.dictionarySource = value as 'eudic' | 'youdao';
@@ -159,8 +156,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName(t('settings_apiDelay'))
-			.setDesc(t('settings_apiDelayDesc'))
+			.setName('API 请求间隔（毫秒）')
+			.setDesc('词典 API 请求之间的延迟（毫秒，建议 500ms 以避免限流）')
 			.addText((text) => {
 				text
 					.setValue(String(this.plugin.settings.apiDelayMs))
@@ -175,8 +172,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName(t('settings_autoLinkFirstOnly'))
-			.setDesc(t('settings_autoLinkFirstOnlyDesc'))
+			.setName('仅链接首次出现')
+			.setDesc('只给文档中每个单词的第一次出现添加双链')
 			.addToggle((toggle) => {
 				toggle
 					.setValue(this.plugin.settings.autoLinkFirstOnly)
@@ -189,15 +186,15 @@ export class LinkDictSettingTab extends PluginSettingTab {
 
 	private renderSyncSection(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName(t('settings_sectionSync'))
+			.setName('欧路云端同步')
 			.setHeading();
 
 		new Setting(containerEl)
-			.setName(t('settings_eudicApiToken'))
-			.setDesc(t('settings_eudicApiTokenDesc'))
+			.setName('欧路词典 API token')
+			.setDesc('从欧路词典官网 获取你的 token')
 			.addText((text) => {
 				text
-					.setPlaceholder(t('settings_eudicApiToken'))
+					.setPlaceholder('欧路词典 API token')
 					.setValue(this.plugin.settings.eudicToken)
 					.onChange(async (value) => {
 						this.plugin.settings.eudicToken = value.trim();
@@ -213,17 +210,17 @@ export class LinkDictSettingTab extends PluginSettingTab {
 			const warningEl = containerEl.createEl('p', { 
 				cls: 'linkdict-warning-text',
 			});
-			warningEl.setText(t('settings_tokenWarning'));
+			warningEl.setText('Token 以明文存储在插件数据中。请勿将 data.json 分享或上传到公开仓库。');
 
 			if (this.categories.length === 0 && !this.categoriesLoaded) {
-				containerEl.createEl('p', {text: t('settings_loadingCategories')});
+				containerEl.createEl('p', {text: '正在加载生词本列表...'});
 				return;
 			}
 
 			if (this.categories.length > 0) {
 				new Setting(containerEl)
-					.setName(t('settings_syncCategories'))
-					.setDesc(t('settings_syncCategoriesDesc'));
+					.setName('同步生词本范围')
+					.setDesc('选择需要同步的生词本（可多选）');
 
 				const categoryContainer = containerEl.createEl('div', {cls: 'linkdict-category-checkboxes'});
 
@@ -247,8 +244,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 				}
 
 				new Setting(containerEl)
-					.setName(t('settings_defaultUploadCategory'))
-					.setDesc(t('settings_defaultUploadCategoryDesc'))
+					.setName('默认上传生词本')
+					.setDesc('本地新建单词时默认上传到此生词本')
 					.addDropdown((dropdown) => {
 						for (const cat of this.categories) {
 							dropdown.addOption(cat.id, cat.name);
@@ -264,8 +261,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 		}
 
 		new Setting(containerEl)
-			.setName(t('settings_enableSync'))
-			.setDesc(t('settings_enableSyncDesc'))
+			.setName('启用同步')
+			.setDesc('启用欧路词典和 Obsidian 之间的双向同步')
 			.addToggle((toggle) => {
 				toggle
 					.setValue(this.plugin.settings.enableSync)
@@ -278,8 +275,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.enableSync) {
 			new Setting(containerEl)
-				.setName(t('settings_syncOnStartup'))
-				.setDesc(t('settings_syncOnStartupDesc'))
+				.setName('启动时同步')
+				.setDesc('插件加载时自动同步')
 				.addToggle((toggle) => {
 					toggle
 						.setValue(this.plugin.settings.syncOnStartup)
@@ -290,8 +287,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 				});
 
 			new Setting(containerEl)
-				.setName(t('settings_startupDelay'))
-				.setDesc(t('settings_startupDelayDesc'))
+				.setName('启动延迟（秒）')
+				.setDesc('启动时同步前的延迟时间（秒）')
 				.addText((text) => {
 					text
 						.setValue(String(this.plugin.settings.startupDelay))
@@ -306,8 +303,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 				});
 
 			new Setting(containerEl)
-				.setName(t('settings_autoSync'))
-				.setDesc(t('settings_autoSyncDesc'))
+				.setName('自动同步')
+				.setDesc('按固定间隔自动同步')
 				.addToggle((toggle) => {
 					toggle
 						.setValue(this.plugin.settings.autoSync)
@@ -321,8 +318,8 @@ export class LinkDictSettingTab extends PluginSettingTab {
 
 			if (this.plugin.settings.autoSync) {
 				new Setting(containerEl)
-					.setName(t('settings_syncInterval'))
-					.setDesc(t('settings_syncIntervalDesc'))
+					.setName('同步间隔（分钟）')
+					.setDesc('同步频率（分钟，最小 5 分钟）')
 					.addText((text) => {
 						text
 							.setValue(String(this.plugin.settings.syncInterval))
@@ -342,65 +339,44 @@ export class LinkDictSettingTab extends PluginSettingTab {
 
 	private renderAdvancedSection(containerEl: HTMLElement): void {
 		new Setting(containerEl)
-			.setName(t('settings_sectionAdvanced'))
+			.setName('通用与高级')
 			.setHeading();
 
 		new Setting(containerEl)
-			.setName(t('settings_language'))
-			.setDesc(t('settings_languageDesc'))
-			.addDropdown((dropdown) => {
-				dropdown
-					.addOption('auto', t('settings_languageAuto'))
-					.addOption('zh', '中文')
-					.addOption('en', 'English')
-					.setValue(this.plugin.settings.language)
-					.onChange(async (value) => {
-						this.plugin.settings.language = value;
-						await this.plugin.saveSettings();
-						if (value === 'auto') {
-							setLanguage(detectLanguage());
-						} else {
-							setLanguage(value as 'en' | 'zh');
-						}
-						this.display();
-					});
-			});
-
-		new Setting(containerEl)
-			.setName(t('settings_clearManifest'))
-			.setDesc(t('settings_clearManifestDesc'))
+			.setName('清除同步记录')
+			.setDesc('重置同步清单，下次同步将把所有单词视为新词')
 			.addButton((btn) => {
 				btn
-					.setButtonText(t('settings_clearManifest'))
+					.setButtonText('清除同步记录')
 					.setWarning()
 					.onClick(() => {
 						new ConfirmModal(
 							this.app,
-							t('settings_clearManifestDesc'),
+							'重置同步清单，下次同步将把所有单词视为新词',
 							() => {
 								void this.plugin.saveData({ syncManifest: { lastSyncTime: '', syncedWords: [] } });
-								new Notice(t('settings_clearManifestConfirm'));
+								new Notice('同步记录已清除');
 							}
 						).open();
 					});
 			});
 
 		new Setting(containerEl)
-			.setName(t('settings_resetPlugin'))
-			.setDesc(t('settings_resetPluginDesc'))
+			.setName('重置插件')
+			.setDesc('将所有设置恢复为默认值')
 			.addButton((btn) => {
 				btn
-					.setButtonText(t('settings_resetPlugin'))
+					.setButtonText('重置插件')
 					.setWarning()
 					.onClick(() => {
 						new ConfirmModal(
 							this.app,
-							t('settings_resetPluginDesc'),
+							'将所有设置恢复为默认值',
 							() => {
 								this.plugin.settings = Object.assign({}, DEFAULT_SETTINGS);
 								void this.plugin.saveSettings();
 								this.display();
-								new Notice(t('settings_resetPluginConfirm'));
+								new Notice('插件已重置为默认设置');
 							}
 						).open();
 					});

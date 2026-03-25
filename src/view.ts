@@ -1,7 +1,6 @@
 import {ItemView, WorkspaceLeaf, setIcon, setTooltip} from 'obsidian';
 import LinkDictPlugin from './main';
 import {DictEntry} from './types';
-import {t} from './i18n';
 import {renderPhoneticButtons} from './ui/phonetic-renderer';
 
 export class DictionaryView extends ItemView {
@@ -42,24 +41,24 @@ export class DictionaryView extends ItemView {
 		this.searchInput = inputWrapper.createEl('input', {
 			type: 'text',
 			cls: 'link-dict-search-input',
-			attr: { placeholder: t('ui_inputWord') }
+			attr: { placeholder: '输入单词...' }
 		});
 
 		const searchButton = inputWrapper.createEl('button', {
 			cls: 'link-dict-search-btn-inside'
 		});
 		setIcon(searchButton, 'search');
-		setTooltip(searchButton, t('ui_search'));
+		setTooltip(searchButton, '搜索');
 		searchButton.addEventListener('click', () => {
 			void this.performSearch();
 		});
 
 		const createNoteButton = searchBarEl.createEl('button', {
 			cls: 'link-dict-action-btn',
-			attr: { 'aria-label': t('ui_createLemmaNote') }
+			attr: { 'aria-label': '创建词元笔记' }
 		});
 		setIcon(createNoteButton, 'file-plus');
-		setTooltip(createNoteButton, t('ui_createLemmaNote'));
+		setTooltip(createNoteButton, '创建词元笔记');
 		createNoteButton.addEventListener('click', () => {
 			const word = this.searchInput.value.trim();
 			if (word) {
@@ -86,7 +85,7 @@ export class DictionaryView extends ItemView {
 			this.resultContainer.empty();
 			const message = this.resultContainer.createEl('p');
 			message.addClass('link-dict-message');
-			message.setText(t('ui_pleaseEnterWord'));
+			message.setText('请输入要查询的单词。');
 			return;
 		}
 
@@ -98,7 +97,7 @@ export class DictionaryView extends ItemView {
 				const message = this.resultContainer.createEl('p');
 				message.addClass('link-dict-message');
 				const textSpan = message.createEl('span');
-				textSpan.setText(`${t('ui_noDefinitionFound')} `);
+				textSpan.setText('未找到定义： ');
 				const strongSpan = message.createEl('strong');
 				strongSpan.setText(word);
 				return;
@@ -172,7 +171,7 @@ export class DictionaryView extends ItemView {
 
 	private renderExtendedData(container: HTMLElement, entry: DictEntry) {
 		if (entry.webTrans && entry.webTrans.length > 0) {
-			this.renderSection(container, t('view_webTranslations'), 'dict-web-trans', entry.webTrans, (section) => {
+			this.renderSection(container, '网络翻译', 'dict-web-trans', entry.webTrans, (section) => {
 				const webList = section.createEl('ul', { cls: 'dict-web-list' });
 				entry.webTrans!.forEach(item => {
 					const li = webList.createEl('li', { cls: 'dict-web-item' });
@@ -185,7 +184,7 @@ export class DictionaryView extends ItemView {
 		}
 
 		if (entry.bilingualExamples && entry.bilingualExamples.length > 0) {
-			this.renderSection(container, t('view_examples'), 'dict-examples', entry.bilingualExamples, (section) => {
+			this.renderSection(container, '例句', 'dict-examples', entry.bilingualExamples, (section) => {
 				const examplesList = section.createEl('div', { cls: 'dict-examples-list' });
 				entry.bilingualExamples!.forEach(example => {
 					const exampleRow = examplesList.createEl('div', { cls: 'dict-example-row' });

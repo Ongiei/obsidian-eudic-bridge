@@ -10,7 +10,6 @@ import {SyncService} from "./sync";
 import {AutoLinkService} from "./auto-link";
 import {BatchUpdateService} from "./batch-update";
 import {ProgressNoticeWidget} from "./modal";
-import {t, setLanguage, detectLanguage} from "./i18n";
 import {MarkdownGenerator} from "./utils/markdown-generator";
 
 export const VIEW_TYPE_LINK_DICT = 'link-dict-view';
@@ -40,16 +39,10 @@ export default class LinkDictPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
-		
-		if (this.settings.language === 'auto') {
-			setLanguage(detectLanguage());
-		} else {
-			setLanguage(this.settings.language as 'en' | 'zh');
-		}
 
 		this.registerView(VIEW_TYPE_LINK_DICT, (leaf) => new DictionaryView(leaf, this));
 
-		this.addRibbonIcon('book-open', t('commands_openDictionaryView'), () => {
+		this.addRibbonIcon('book-open', '打开词典视图', () => {
 			void this.activateView();
 		});
 
@@ -105,22 +98,22 @@ export default class LinkDictPlugin extends Plugin {
 		}
 
 		if (this.settings.eudicToken && this.settings.enableSync) {
-			this.syncRibbonIcon = this.addRibbonIcon('refresh-cw', t('commands_syncPreview'), () => {
+			this.syncRibbonIcon = this.addRibbonIcon('refresh-cw', '预检欧路同步', () => {
 				void this.performSync(false);
 			});
 		}
 
-		this.batchRibbonIcon = this.addRibbonIcon('layers', t('commands_batchUpdate'), () => {
+		this.batchRibbonIcon = this.addRibbonIcon('layers', '批量更新缺失释义', () => {
 			void this.performBatchUpdate();
 		});
 
-		this.autoLinkRibbonIcon = this.addRibbonIcon('link', t('commands_autoLinkDocument'), () => {
+		this.autoLinkRibbonIcon = this.addRibbonIcon('link', '自动链接当前文档', () => {
 			const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 			if (view) {
 				const editor = view.editor;
 				void this.autoLinkDocument(editor);
 			} else {
-				new Notice(t('notice_pleaseOpenMarkdown'));
+				new Notice('请先打开一个 Markdown 文档。');
 			}
 		});
 	}
@@ -128,7 +121,7 @@ export default class LinkDictPlugin extends Plugin {
 	private registerCommands(): void {
 		this.addCommand({
 			id: 'open-dictionary-view',
-			name: t('commands_openDictionaryView'),
+			name: '打开词典视图',
 			callback: () => {
 				void this.activateView();
 			}
@@ -136,16 +129,16 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'define-selected-word',
-			name: t('commands_createLemmaNote'),
+			name: '创建词元笔记',
 			editorCallback: (editor: Editor, _view: MarkdownView) => {
 				const selectedText = editor.getSelection();
 				if (!selectedText || selectedText.trim() === '') {
-					new Notice(t('notice_pleaseSelectWord'));
+					new Notice('请先选择一个单词。');
 					return;
 				}
 				const word = sanitizeWord(selectedText);
 				if (!isValidWord(word)) {
-					new Notice(t('notice_pleaseSelectValidWord'));
+					new Notice('请选择一个有效的单词');
 					return;
 				}
 				void this.searchAndGenerateNote(word, editor);
@@ -154,16 +147,16 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'lookup-selection',
-			name: t('commands_lookUpSelection'),
+			name: '查询选中内容',
 			editorCallback: async (editor: Editor, _view: MarkdownView) => {
 				const selectedText = editor.getSelection();
 				if (!selectedText || selectedText.trim() === '') {
-					new Notice(t('notice_pleaseSelectWord'));
+					new Notice('请先选择一个单词。');
 					return;
 				}
 				const word = sanitizeWord(selectedText);
 				if (!isValidWord(word)) {
-					new Notice(t('notice_pleaseSelectValidWord'));
+					new Notice('请选择一个有效的单词');
 					return;
 				}
 				const popover = new DefinitionPopover(this, editor, word);
@@ -173,19 +166,19 @@ export default class LinkDictPlugin extends Plugin {
 						popover.setEntry(result.entry);
 					} else {
 						popover.close();
-						new Notice(`${t('ui_noDefinitionFound')} ${word}`);
+						new Notice(`未找到定义： ${word}`);
 					}
 				} catch (error) {
 					popover.close();
 					const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-					new Notice(t('notice_syncFailed', { error: errorMsg }));
+					new Notice(`同步失败：${errorMsg}`);
 				}
 			}
 		});
 
 		this.addCommand({
 			id: 'sync-preview',
-			name: t('commands_syncPreview'),
+			name: '预检欧路同步',
 			callback: () => {
 				void this.performSync(false);
 			}
@@ -193,7 +186,7 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'auto-link-document',
-			name: t('commands_autoLinkDocument'),
+			name: '自动链接当前文档',
 			editorCallback: (editor: Editor) => {
 				void this.autoLinkDocument(editor);
 			}
@@ -201,7 +194,7 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'batch-update-definitions',
-			name: t('commands_batchUpdate'),
+			name: '批量更新缺失释义',
 			callback: () => {
 				void this.performBatchUpdate();
 			}
@@ -215,16 +208,16 @@ export default class LinkDictPlugin extends Plugin {
 
 				menu.addItem((item) => {
 					item
-						.setTitle(t('menu_createLemmaNote'))
+						.setTitle('创建词元笔记')
 						.setIcon('book-open')
 						.onClick(() => {
 							if (!selection || selection.trim() === '') {
-								new Notice(t('notice_pleaseSelectWord'));
+								new Notice('请先选择一个单词。');
 								return;
 							}
 							const word = sanitizeWord(selection);
 							if (!isValidWord(word)) {
-								new Notice(t('notice_pleaseSelectValidWord'));
+								new Notice('请选择一个有效的单词');
 								return;
 							}
 							void this.searchAndGenerateNote(word, editor);
@@ -233,16 +226,16 @@ export default class LinkDictPlugin extends Plugin {
 
 				menu.addItem((item) => {
 					item
-						.setTitle(t('menu_lookUpSelection'))
+						.setTitle('查询选中内容')
 						.setIcon('search')
 						.onClick(async () => {
 							if (!selection || selection.trim() === '') {
-								new Notice(t('notice_pleaseSelectWord'));
+								new Notice('请先选择一个单词。');
 								return;
 							}
 							const word = sanitizeWord(selection);
 							if (!isValidWord(word)) {
-								new Notice(t('notice_pleaseSelectValidWord'));
+								new Notice('请选择一个有效的单词');
 								return;
 							}
 							const popover = new DefinitionPopover(this, editor, word);
@@ -252,12 +245,12 @@ export default class LinkDictPlugin extends Plugin {
 									popover.setEntry(result.entry);
 								} else {
 									popover.close();
-									new Notice(`${t('ui_noDefinitionFound')} ${word}`);
+									new Notice(`未找到定义： ${word}`);
 								}
 							} catch (error) {
 								popover.close();
 								const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-								new Notice(t('notice_syncFailed', { error: errorMsg }));
+								new Notice(`同步失败：${errorMsg}`);
 							}
 						});
 				});
@@ -299,9 +292,9 @@ export default class LinkDictPlugin extends Plugin {
 
 		const success = await this.batchUpdateService.updateSingleWord(word);
 		if (success) {
-			new Notice(t('notice_updateSuccess', { word }));
+			new Notice(`已更新 "${word}" 的释义`);
 		} else {
-			new Notice(t('notice_updateFailed', { word }));
+			new Notice(`更新 "${word}" 失败`);
 		}
 	}
 
@@ -362,7 +355,7 @@ export default class LinkDictPlugin extends Plugin {
 	async performSync(isAutoSync = false): Promise<void> {
 		if (!this.syncService || !this.eudicService) {
 			if (!isAutoSync) {
-				new Notice(t('notice_noTokenConfigured'));
+				new Notice('请先配置欧路词典 API token');
 			}
 			return;
 		}
@@ -378,7 +371,7 @@ export default class LinkDictPlugin extends Plugin {
 
 			if (!hasChanges) {
 				if (!isAutoSync) {
-					new Notice(t('sync_no_changes'), 2000);
+					new Notice('未检测到变更。本地与云端已同步。', 2000);
 				}
 				return;
 			}
@@ -388,7 +381,7 @@ export default class LinkDictPlugin extends Plugin {
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : 'Unknown error';
 			if (!isAutoSync) {
-				new Notice(t('notice_syncFailed', { error: errorMsg }));
+				new Notice(`同步失败：${errorMsg}`);
 			}
 			console.error('[LinkDict] Sync failed:', errorMsg);
 		}
@@ -403,7 +396,7 @@ export default class LinkDictPlugin extends Plugin {
 			dryRunResult.cloudDeleted.length;
 
 		if (totalOps === 0) {
-			new Notice(t('sync_no_changes'));
+			new Notice('未检测到变更。本地与云端已同步。');
 			return;
 		}
 
@@ -427,7 +420,7 @@ export default class LinkDictPlugin extends Plugin {
 			progressNotice.setComplete(result.stats.uploaded, result.stats.downloaded);
 		} else if (result.errors.length > 0) {
 			progressNotice.hide();
-			new Notice(t('notice_syncFailed', { error: result.errors[0] ?? 'Unknown error' }));
+			new Notice(`同步失败：${result.errors[0] ?? 'Unknown error'}`);
 		}
 	}
 
@@ -446,7 +439,7 @@ export default class LinkDictPlugin extends Plugin {
 
 		this.autoLinkService.invalidateCache();
 		const count = await this.autoLinkService.autoLinkCurrentDocument(editor);
-		new Notice(t('notice_autoLinkCompleted', { count }));
+		new Notice(`自动链接完成。添加了 ${count} 个链接。`);
 	}
 
 	private async handleFileDeleted(file: TFile): Promise<void> {
@@ -465,7 +458,7 @@ export default class LinkDictPlugin extends Plugin {
 
 	async addToEudic(word: string): Promise<boolean> {
 		if (!this.eudicService) {
-			new Notice(t('notice_pleaseConfigureToken'));
+			new Notice('请在设置中配置欧路词典 API token');
 			return false;
 		}
 
@@ -473,11 +466,11 @@ export default class LinkDictPlugin extends Plugin {
 
 		try {
 			await this.eudicService.addWords(listId, [word]);
-			new Notice(t('notice_addedToEudic', { word, message: '' }));
+			new Notice(`已将 "${word}" 添加到欧路生词本。`);
 			return true;
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-			new Notice(t('notice_failedToAddEudic', { error: errorMessage }));
+			new Notice(`添加到欧路失败：${errorMessage}`);
 			return false;
 		}
 	}
@@ -504,7 +497,7 @@ export default class LinkDictPlugin extends Plugin {
 		const result = await this.findEntry(searchWord, true);
 
 		if (!result) {
-			new Notice(t('notice_wordNotFound', { word: searchWord }));
+			new Notice(`词典中未找到单词 "${searchWord}"`);
 			return;
 		}
 
