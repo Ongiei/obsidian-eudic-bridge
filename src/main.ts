@@ -112,7 +112,7 @@ export default class EudicBridgePlugin extends Plugin {
 		}
 
 		if (this.settings.eudicToken && this.settings.enableSync) {
-			this.syncRibbonIcon = this.addRibbonIcon('refresh-cw', '预检欧路同步', () => {
+			this.syncRibbonIcon = this.addRibbonIcon('refresh-cw', '欧路同步', () => {
 				void this.performSync(false);
 			});
 		}
@@ -220,20 +220,20 @@ export default class EudicBridgePlugin extends Plugin {
 			this.app.workspace.on('editor-menu', (menu: Menu, editor: Editor, _view: MarkdownView) => {
 				const selection = editor.getSelection();
 
+				if (!selection || selection.trim() === '') {
+					return;
+				}
+
+				const word = sanitizeWord(selection);
+				if (!isValidWord(word)) {
+					return;
+				}
+
 				menu.addItem((item) => {
 					item
 						.setTitle('创建词元笔记')
 						.setIcon('book-open')
 						.onClick(() => {
-							if (!selection || selection.trim() === '') {
-								new Notice('请先选择一个单词。');
-								return;
-							}
-							const word = sanitizeWord(selection);
-							if (!isValidWord(word)) {
-								new Notice('请选择一个有效的单词');
-								return;
-							}
 							void this.searchAndGenerateNote(word, editor);
 						});
 				});
@@ -243,15 +243,6 @@ export default class EudicBridgePlugin extends Plugin {
 						.setTitle('查询选中内容')
 						.setIcon('search')
 						.onClick(async () => {
-							if (!selection || selection.trim() === '') {
-								new Notice('请先选择一个单词。');
-								return;
-							}
-							const word = sanitizeWord(selection);
-							if (!isValidWord(word)) {
-								new Notice('请选择一个有效的单词');
-								return;
-							}
 							const popover = new DefinitionPopover(this, editor, word);
 							try {
 								const result = await this.findEntry(word, false);
@@ -264,7 +255,7 @@ export default class EudicBridgePlugin extends Plugin {
 							} catch (error) {
 								popover.close();
 								const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-								new Notice(`同步失败：${errorMsg}`);
+								new Notice(`查询失败：${errorMsg}`);
 							}
 						});
 				});
@@ -425,9 +416,10 @@ export default class EudicBridgePlugin extends Plugin {
 		}, abortSignal);
 
 		if (result.aborted) {
-			progressNotice.setAborted(result.stats.uploaded + result.stats.downloaded);
+progressNotice.setAborted(result.stats.uploaded + result.stats.downloaded);
+
 		} else if (result.success) {
-			progressNotice.setComplete(result.stats.uploaded, result.stats.downloaded);
+			progressNotice.setComplete(result.stats);
 		} else if (result.errors.length > 0) {
 			progressNotice.hide();
 			new Notice(`同步失败：${result.errors[0] ?? 'Unknown error'}`);
@@ -441,8 +433,14 @@ export default class EudicBridgePlugin extends Plugin {
 	async autoLinkDocument(editor: Editor): Promise<void> {
 		const service = this.ensureAutoLinkService();
 		service.invalidateCache();
+		const notice = new Notice('正在分析文档...', 0);
 		const count = await service.autoLinkCurrentDocument(editor);
-		new Notice(`自动链接完成。添加了 ${count} 个链接。`);
+		notice.hide();
+		if (count === 0) {
+			new Notice('未找到可链接的单词。请先在 EudicBridge 文件夹中创建单词笔记。');
+		} else {
+			new Notice(`自动链接完成，添加了 ${count} 个链接。`);
+		}
 	}
 
 	private async handleFileDeleted(file: TFile): Promise<void> {

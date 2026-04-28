@@ -49,7 +49,7 @@ interface CloudWordData {
 async function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => {
-			reject(new Error(`Timeout: ${operation}`));
+			reject(new Error(`操作超时：${operation}`));
 		}, ms);
 		
 		promise
@@ -287,7 +287,7 @@ export class SyncService {
 				success: false,
 				aborted: false,
 				stats: { uploaded: 0, downloaded: 0, deletedFromCloud: 0, trashedLocally: 0, failed: 0 },
-				errors: ['Sync already in progress'],
+				errors: ['同步正在进行中，请稍后再试'],
 			};
 		}
 

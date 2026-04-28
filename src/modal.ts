@@ -54,15 +54,21 @@ export class ProgressNoticeWidget {
 		this.notice.messageEl.empty();
 		this.notice.messageEl.addClass('eudicbridge-notice-complete');
 		this.notice.messageEl.createEl('div', { cls: 'eudicbridge-notice-result' })
-			.textContent = `同步已中止。成功更新 ${count} 个词。`;
+			.textContent = `同步已中止，已处理 ${count} 个词。`;
 		setTimeout(() => this.hide(), 3000);
 	}
 
-	setComplete(uploaded: number, downloaded: number): void {
+	setComplete(stats: { uploaded: number; downloaded: number; deletedFromCloud: number; trashedLocally: number; failed: number }): void {
 		this.notice.messageEl.empty();
 		this.notice.messageEl.addClass('eudicbridge-notice-complete');
-		this.notice.messageEl.createEl('div', { cls: 'eudicbridge-notice-result' })
-			.textContent = `同步完成。上传：${uploaded}，下载：${downloaded}`;
+		const resultEl = this.notice.messageEl.createEl('div', { cls: 'eudicbridge-notice-result' });
+		const parts: string[] = [];
+		if (stats.uploaded > 0) parts.push(`上传 ${stats.uploaded}`);
+		if (stats.downloaded > 0) parts.push(`下载 ${stats.downloaded}`);
+		if (stats.deletedFromCloud > 0) parts.push(`云端删除 ${stats.deletedFromCloud}`);
+		if (stats.trashedLocally > 0) parts.push(`本地删除 ${stats.trashedLocally}`);
+		if (stats.failed > 0) parts.push(`失败 ${stats.failed}`);
+		resultEl.textContent = parts.length > 0 ? `同步完成：${parts.join('，')}` : '同步完成，无变更。';
 		setTimeout(() => this.hide(), 3000);
 	}
 

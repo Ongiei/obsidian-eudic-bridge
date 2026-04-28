@@ -37,6 +37,21 @@ export class EudicService {
 		this.token = token;
 	}
 
+	private static friendlyError(status: number, operation: string): string {
+		const map: Record<number, string> = {
+			400: '请求参数错误',
+			401: 'API Token 无效，请检查设置',
+			403: 'Token 权限不足',
+			404: '资源不存在',
+			429: '请求过于频繁，请稍后再试',
+			500: '欧路服务器错误，请稍后再试',
+			502: '欧路服务器暂时不可用',
+			503: '欧路服务器维护中',
+		};
+		const reason = map[status] || `服务器返回错误 (${status})`;
+		return `${operation}失败：${reason}`;
+	}
+
 	private async request(method: string, path: string, body?: unknown): Promise<RequestUrlResponse> {
 		const url = `${BASE_URL}${path}`;
 		const options: RequestUrlParam = {
@@ -59,7 +74,7 @@ export class EudicService {
 	async getCategories(language: string = 'en'): Promise<EudicCategory[]> {
 		const response = await this.request('GET', `/studylist/category?language=${language}`);
 		if (response.status >= 400) {
-			throw new Error(`Failed to get categories: ${response.status}`);
+			throw new Error(EudicService.friendlyError(response.status, '获取生词本列表'));
 		}
 		const data = response.json as EudicCategoriesResponse;
 		return data.data;
@@ -73,7 +88,7 @@ export class EudicService {
 		});
 
 		if (response.status >= 400) {
-			throw new Error(`Failed to add words: ${response.status} - ${response.text}`);
+			throw new Error(EudicService.friendlyError(response.status, '添加单词'));
 		}
 
 		const data = response.json as EudicAddWordsResponse;
@@ -87,7 +102,7 @@ export class EudicService {
 		});
 
 		if (response.status >= 400) {
-			throw new Error(`Failed to create category: ${response.status}`);
+			throw new Error(EudicService.friendlyError(response.status, '创建生词本'));
 		}
 
 		const data = response.json as EudicCreateCategoryResponse;
@@ -98,7 +113,7 @@ export class EudicService {
 		const response = await this.request('GET', `/studylist/words/${categoryId}?language=${language}&page=${page}&page_size=${pageSize}`);
 		
 		if (response.status >= 400) {
-			throw new Error(`Failed to get words: ${response.status}`);
+			throw new Error(EudicService.friendlyError(response.status, '获取单词列表'));
 		}
 
 		const data = response.json as EudicWordsResponse;
@@ -113,10 +128,9 @@ export class EudicService {
 		});
 
 		if (response.status >= 400) {
-			throw new Error(`Failed to delete words: ${response.status} - ${response.text}`);
+			throw new Error(EudicService.friendlyError(response.status, '删除单词'));
 		}
 
-		// Handle empty response (204 No Content or empty body)
 		if (!response.text || response.text.trim() === '') {
 			return 'success';
 		}

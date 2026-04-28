@@ -1,4 +1,4 @@
-import { App, Editor, TFile, TFolder } from 'obsidian';
+import { App, Editor, Notice, TFile, TFolder } from 'obsidian';
 import { EudicBridgeSettings } from './settings';
 import { getLemma } from './lemmatizer';
 
@@ -86,7 +86,10 @@ export class AutoLinkService {
 			const newBody = newLines.join('\n');
 			const newText = frontmatter + newBody;
 
-			editor.setValue(newText);
+			const from = { line: 0, ch: 0 };
+			const to = editor.offsetToPos(content.length);
+			editor.replaceRange(newText, from, to);
+
 			return linkedWords.size;
 		} catch (error) {
 			console.error('[EudicBridge] Auto-link failed:', error);

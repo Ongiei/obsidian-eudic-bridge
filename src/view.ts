@@ -63,11 +63,17 @@ export class DictionaryView extends ItemView {
 		createNoteButton.addEventListener('click', () => {
 			const word = this.searchInput.value.trim();
 			if (word) {
-				void this.plugin.searchAndGenerateNote(word);
+				void (async () => {
+					await this.plugin.searchAndGenerateNote(word);
+					new Notice(`已创建 ${word} 的单词笔记`);
+				})();
 			}
 		});
 
 		this.resultContainer = contentEl.createEl('div', { cls: 'dict-result-container' });
+
+		const placeholder = this.resultContainer.createEl('div', { cls: 'eudic-bridge-message' });
+		placeholder.createEl('span', { text: '输入一个单词开始查询' });
 
 		this.searchInput.addEventListener('keydown', (event) => {
 			if (event.key === 'Enter') {
