@@ -437,9 +437,9 @@ progressNotice.setAborted(result.stats.uploaded + result.stats.downloaded);
 		const count = await service.autoLinkCurrentDocument(editor);
 		notice.hide();
 		if (count === 0) {
-			new Notice('未找到可链接的单词。请先在 EudicBridge 文件夹中创建单词笔记。');
+			new Notice('未找到可链接的单词，请先在 EudicBridge 文件夹中创建单词笔记');
 		} else {
-			new Notice(`自动链接完成，添加了 ${count} 个链接。`);
+			new Notice(`自动链接完成，添加了 ${count} 个链接`);
 		}
 	}
 

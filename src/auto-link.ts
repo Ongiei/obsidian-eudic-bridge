@@ -1,4 +1,4 @@
-import { App, Editor, Notice, TFile, TFolder } from 'obsidian';
+import { App, Editor, TFile, TFolder } from 'obsidian';
 import { EudicBridgeSettings } from './settings';
 import { getLemma } from './lemmatizer';
 
