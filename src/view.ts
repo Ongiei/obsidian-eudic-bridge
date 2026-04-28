@@ -1,4 +1,4 @@
-import {ItemView, WorkspaceLeaf, setIcon, setTooltip} from 'obsidian';
+import {ItemView, WorkspaceLeaf, Notice, setIcon, setTooltip} from 'obsidian';
 import EudicBridgePlugin from './main';
 import {DictEntry} from './types';
 import {renderPhoneticButtons} from './ui/phonetic-renderer';

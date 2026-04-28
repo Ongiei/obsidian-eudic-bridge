@@ -149,12 +149,12 @@ export class BatchUpdateService {
 				await this.delay(this.settings.apiDelayMs);
 			}
 
-			this.progressNotice?.setComplete(result.updated, result.failed);
+			this.progressNotice?.setComplete({ uploaded: result.updated, downloaded: 0, deletedFromCloud: 0, trashedLocally: 0, failed: result.failed });
 			console.debug(`[EudicBridge] Complete. Updated: ${result.updated}, Failed: ${result.failed}`);
 		} catch (error) {
 			const errMsg = error instanceof Error ? error.message : String(error);
 			console.error('[EudicBridge] Fatal error:', errMsg);
-			this.progressNotice?.setComplete(result.updated, result.failed);
+			this.progressNotice?.setComplete({ uploaded: result.updated, downloaded: 0, deletedFromCloud: 0, trashedLocally: 0, failed: result.failed });
 		} finally {
 			this.isRunning = false;
 			this.progressNotice = null;
