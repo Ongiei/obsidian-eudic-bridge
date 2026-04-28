@@ -24,6 +24,12 @@ export default tseslint.config(
 	},
 	...obsidianmd.configs.recommended,
 	{
+		files: ['src/**/*.ts'],
+		rules: {
+			'obsidianmd/ui/sentence-case': 'off',
+		},
+	},
+	{
 		files: ['src/popover.ts'],
 		rules: {
 			'obsidianmd/no-static-styles-assignment': 'off',
