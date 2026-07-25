@@ -1,7 +1,7 @@
 import { App, Platform, TFile } from 'obsidian';
 import { LexiBridgeSettings } from '../settings';
 import { AnkiCardMapper, safeTagPart } from './card-mapper';
-import { AnkiConnectClient } from './anki-connect-client';
+import {AnkiConnectClient, AnkiConnectUnknownResultError} from './anki-connect-client';
 import { AnkiModelManager } from './model-manager';
 import { AnkiSyncPlanner } from './sync-planner';
 import { WordNoteRepository } from './word-note-repository';
@@ -22,6 +22,7 @@ interface ExecutePlanOptions {
 
 export class AnkiSyncService {
 	private readonly repository: WordNoteRepository;
+	private executionInProgress = false;
 
 	constructor(
 		private app: App,
@@ -65,20 +66,24 @@ export class AnkiSyncService {
 	}
 
 	async executeFullSync(onProgress?: (message: string) => void): Promise<AnkiExecutionResult> {
-		this.assertDesktopAvailable();
-		const snapshots = await this.repository.readAll();
-		const preview = await this.createPreview(snapshots);
-		return this.executePlan(preview.plan, { handleMissingSources: true }, onProgress);
+		return this.runExclusive(async () => {
+			this.assertDesktopAvailable();
+			const snapshots = await this.repository.readAll();
+			const preview = await this.createPreview(snapshots);
+			return this.executePlan(preview.plan, { handleMissingSources: true }, onProgress);
+		});
 	}
 
 	async executeMissingSourceAction(
 		action: MissingSourceAction,
 		onProgress?: (message: string) => void
 	): Promise<AnkiExecutionResult> {
-		this.assertDesktopAvailable();
-		const snapshots = await this.repository.readAll();
-		const preview = await this.createPreview(snapshots);
-		return this.executeMissingSourcePlan(preview, action, onProgress);
+		return this.runExclusive(async () => {
+			this.assertDesktopAvailable();
+			const snapshots = await this.repository.readAll();
+			const preview = await this.createPreview(snapshots);
+			return this.executeMissingSourcePlan(preview, action, onProgress);
+		});
 	}
 
 	async previewCurrentFile(file: TFile): Promise<AnkiPreviewResult> {
@@ -92,9 +97,11 @@ export class AnkiSyncService {
 	}
 
 	async executeCurrentFile(file: TFile, onProgress?: (message: string) => void): Promise<AnkiExecutionResult> {
-		this.assertDesktopAvailable();
-		const preview = await this.previewCurrentFile(file);
-		return this.executePlan(preview.plan, { handleMissingSources: false }, onProgress);
+		return this.runExclusive(async () => {
+			this.assertDesktopAvailable();
+			const preview = await this.previewCurrentFile(file);
+			return this.executePlan(preview.plan, { handleMissingSources: false }, onProgress);
+		});
 	}
 
 	private async createPreview(snapshots: WordNoteSnapshot[]): Promise<AnkiPreviewResult> {
@@ -146,12 +153,25 @@ export class AnkiSyncService {
 		await new AnkiModelManager(client).ensureDeckAndModel(settings.anki.deckName, settings.anki.modelName, settings.anki);
 
 		const addedNoteIds: number[] = [];
+		const sourceTag = `lexibridge::source::${safeTagPart(settings.anki.ankiSourceId)}`;
 		if (plan.adds.length > 0) {
 			onProgress?.(`正在新增 ${plan.adds.length} 条 Anki 笔记...`);
 			for (let offset = 0; offset < plan.adds.length; offset += ADD_NOTES_BATCH_SIZE) {
 				const batch = plan.adds.slice(offset, offset + ADD_NOTES_BATCH_SIZE);
 				onProgress?.(`正在新增 ${offset + 1}-${offset + batch.length} / ${plan.adds.length} 条 Anki 笔记...`);
-				const addResults = await client.addNotes(batch.map(item => toAnkiAddPayload(item.desired)));
+				let addResults: (number | null)[];
+				try {
+					addResults = await client.addNotes(batch.map(item => toAnkiAddPayload(item.desired)));
+				} catch (error) {
+					if (!(error instanceof AnkiConnectUnknownResultError)) throw error;
+					const reconciledIds = await this.reconcileDesiredNotes(client, sourceTag, batch.map(item => item.desired));
+					if (!reconciledIds) {
+						stats.failed += batch.length;
+						errors.push(`新增 Anki 笔记的结果未知：${error.message}`);
+						return {success: false, stats, errors};
+					}
+					addResults = reconciledIds;
+				}
 				addResults.forEach((noteId, index) => {
 					const word = batch[index]?.desired.word || '未知词条';
 					if (typeof noteId === 'number') {
@@ -173,6 +193,17 @@ export class AnkiSyncService {
 				updatedNoteIds.push(item.existing.noteId);
 				stats.updated += 1;
 			} catch (error) {
+				if (error instanceof AnkiConnectUnknownResultError) {
+					const reconciled = await this.reconcileUpdatedNote(client, item.existing.noteId, item.desired);
+					if (reconciled) {
+						updatedNoteIds.push(item.existing.noteId);
+						stats.updated += 1;
+						continue;
+					}
+					stats.failed += 1;
+					errors.push(`更新 ${item.desired.word} 的结果未知：${error.message}`);
+					break;
+				}
 				stats.failed += 1;
 				errors.push(`更新 ${item.desired.word} 失败：${error instanceof Error ? error.message : String(error)}`);
 			}
@@ -234,6 +265,51 @@ export class AnkiSyncService {
 		}
 
 		return { success: errors.length === 0, stats, errors };
+	}
+
+	private async reconcileDesiredNotes(
+		client: AnkiConnectClient,
+		sourceTag: string,
+		desiredNotes: DesiredAnkiNote[]
+	): Promise<number[] | null> {
+		try {
+			const noteIds = await client.findNotes(`tag:${sourceTag}`);
+			const notes = await client.notesInfo(noteIds);
+			const byId = new Map(notes.map(note => [note.fields.LexiBridgeId?.value || '', note]));
+			const matchedIds: number[] = [];
+			for (const desired of desiredNotes) {
+				const note = byId.get(desired.lexiBridgeId);
+				if (!note || note.fields.ContentHash?.value !== desired.contentHash) return null;
+				matchedIds.push(note.noteId);
+			}
+			return matchedIds;
+		} catch {
+			return null;
+		}
+	}
+
+	private async reconcileUpdatedNote(
+		client: AnkiConnectClient,
+		noteId: number,
+		desired: DesiredAnkiNote
+	): Promise<boolean> {
+		try {
+			const [note] = await client.notesInfo([noteId]);
+			return note?.fields.LexiBridgeId?.value === desired.lexiBridgeId
+				&& note.fields.ContentHash?.value === desired.contentHash;
+		} catch {
+			return false;
+		}
+	}
+
+	private async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+		if (this.executionInProgress) throw new Error('Anki 同步正在进行中，请等待当前操作完成。');
+		this.executionInProgress = true;
+		try {
+			return await operation();
+		} finally {
+			this.executionInProgress = false;
+		}
 	}
 
 	private async executeMissingSourcePlan(

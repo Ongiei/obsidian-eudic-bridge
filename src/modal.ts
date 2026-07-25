@@ -38,7 +38,7 @@ export class EcdictProgressNotice {
 		this.actionButton.addEventListener('click', () => {
 			if (!this.running) return;
 			this.abortSignal.aborted = true;
-			this.actionButton.setText('正在停止');
+			this.actionButton.setText('等待当前下载或批次结束');
 			this.actionButton.disabled = true;
 		});
 	}
@@ -103,7 +103,7 @@ export class ProgressNoticeWidget {
 		this.abortButton.addEventListener('click', () => {
 			if (this.isAborted) return;
 			this.isAborted = true;
-			this.abortButton.setText('正在停止');
+			this.abortButton.setText('完成当前请求后停止');
 			this.abortButton.disabled = true;
 			onAbort();
 		});

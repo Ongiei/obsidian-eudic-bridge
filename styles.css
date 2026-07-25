@@ -1,9 +1,12 @@
 .dict-view-content {
+	box-sizing: border-box;
+	min-width: 0;
 	padding: 10px;
 	font-size: 0.9em;
 }
 
 .lexibridge-sidebar-view {
+	container: lexibridge-dictionary / inline-size;
 	padding: 16px 20px;
 	max-height: calc(100vh - 40px);
 	overflow-y: auto;
@@ -28,54 +31,31 @@
 }
 
 .lexibridge-sidebar-view .lexibridge-search-box {
-	width: 100%;
-	padding: 0;
 	margin-bottom: 12px;
-	display: flex;
-	align-items: center;
+}
+
+.lexibridge-query-controls {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 32px;
+	flex: 1 1 140px;
 	gap: 6px;
+	min-width: 0;
 }
 
 .lexibridge-input-wrapper {
-	position: relative;
-	display: flex;
-	align-items: center;
-	flex: 1;
 	min-width: 0;
 }
 
 .lexibridge-input-wrapper .lexibridge-search-input {
 	width: 100%;
-	padding-right: 36px;
+	height: 32px;
+	min-height: 32px;
 }
 
-.lexibridge-search-btn-inside {
-	position: absolute;
-	right: 4px;
-	top: 50%;
-	transform: translateY(-50%);
-	width: 28px;
-	height: 28px;
-	padding: 0;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	background: transparent;
-	border: none;
-	box-shadow: none;
-	color: var(--text-muted);
-	cursor: pointer;
-	border-radius: 4px;
-	opacity: 0.5;
-}
-
-.lexibridge-search-btn-inside:hover {
-	opacity: 1;
-	color: var(--text-normal);
-}
-
+.lexibridge-search-btn-inside,
 .lexibridge-action-btn {
-	flex-shrink: 0;
+	box-sizing: border-box;
+	flex: 0 0 32px;
 	width: 32px;
 	height: 32px;
 	padding: 0;
@@ -88,25 +68,38 @@
 	color: var(--text-muted);
 	cursor: pointer;
 	border-radius: 4px;
-	opacity: 0.7;
 }
 
-.lexibridge-action-btn:hover {
-	opacity: 1;
+.lexibridge-action-btn {
+	margin-inline-start: auto;
+}
+
+.lexibridge-search-btn-inside:hover,
+.lexibridge-search-btn-inside:focus-visible {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.lexibridge-action-btn:hover,
+.lexibridge-action-btn:focus-visible {
 	color: var(--interactive-accent);
 	background: var(--background-modifier-hover);
 }
 
 .lexibridge-search-box {
+	box-sizing: border-box;
 	display: flex;
-	align-items: center;
+	flex-wrap: wrap;
+	align-items: stretch;
 	gap: 6px;
 	width: 100%;
 	padding: 0 4px;
 }
 
 .lexibridge-search-input {
-	flex-grow: 1;
+	box-sizing: border-box;
+	width: 100%;
+	height: 32px;
 	min-width: 0;
 	padding: 6px 10px;
 	border: 1px solid var(--background-modifier-border);
@@ -115,9 +108,10 @@
 	color: var(--text-normal);
 }
 
-.lexibridge-search-input:focus {
+.lexibridge-search-input:focus-visible {
 	outline: none;
 	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .lexibridge-search-btn {
@@ -130,6 +124,7 @@
 }
 
 .dict-result-container {
+	min-width: 0;
 	min-height: 100px;
 }
 
@@ -137,15 +132,17 @@
 	display: flex;
 	flex-direction: column;
 	gap: 16px;
+	min-width: 0;
 }
 
 .dict-header-container {
-	display: flex;
-	justify-content: flex-start;
-	align-items: center;
+	display: grid;
+	grid-template-areas: "word source";
+	grid-template-columns: minmax(0, 1fr) max-content;
+	align-items: start;
 	width: 100%;
 	margin-bottom: 8px;
-	gap: 8px;
+	gap: 8px 12px;
 }
 
 .lexibridge-sidebar-view .dict-header-container {
@@ -155,53 +152,66 @@
 	padding-right: 2px;
 }
 
-.lexibridge-sidebar-view .dict-header-left {
-	flex-grow: 1;
-}
-
 .dict-header-left {
-	flex: 1;
+	grid-area: word;
 	display: flex;
+	flex-direction: column;
 	flex-wrap: wrap;
-	align-items: baseline;
-	gap: 8px;
+	align-items: flex-start;
+	gap: 6px;
+	min-width: 0;
 }
 
 .dict-title {
+	max-width: 100%;
 	margin: 0;
 	line-height: 1.1;
-	word-break: break-word;
+	overflow-wrap: anywhere;
 	font-size: 1.2em;
 	font-weight: 600;
 }
 
 .dict-phonetic-container {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 6px;
 	align-items: center;
+	min-width: 0;
+	max-width: 100%;
 }
 
 .dict-phonetic-btn {
 	display: inline-flex;
+	flex: 0 1 auto;
 	align-items: center;
 	gap: 4px;
+	height: auto;
+	max-width: 100%;
+	min-height: 28px;
 	padding: 2px 8px;
 	background-color: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 12px;
 	font-size: 0.8em;
 	cursor: pointer;
-	white-space: nowrap;
-	transition: all 0.2s ease;
+	overflow-wrap: anywhere;
+	text-align: start;
+	white-space: normal;
+	transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
 	color: var(--text-muted);
 	font: inherit;
 	line-height: 1.4;
 }
 
-.dict-phonetic-btn:hover {
+.dict-phonetic-btn:hover:not(:disabled),
+.dict-phonetic-btn:focus-visible {
 	background-color: var(--background-modifier-hover);
 	color: var(--text-normal);
 	border-color: var(--interactive-accent);
+}
+
+.dict-phonetic-btn:disabled {
+	cursor: default;
 }
 
 .dict-definitions-list {
@@ -217,6 +227,7 @@
 .dict-view-content .dict-definitions-list .dict-def-row {
 	display: flex;
 	align-items: baseline;
+	min-width: 0;
 	margin-bottom: 4px;
 	line-height: 1.4;
 	font-size: 0.9em;
@@ -234,7 +245,9 @@
 
 .dict-def-text {
 	flex-grow: 1;
-	word-break: break-word;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	line-break: anywhere;
 	color: var(--text-normal);
 }
 
@@ -270,6 +283,7 @@
 }
 
 .dict-tag-form {
+	max-width: 100%;
 	background-color: var(--background-modifier-border);
 	border: 1px solid transparent;
 	color: var(--text-normal);
@@ -282,12 +296,16 @@
 }
 
 .dict-form-label {
+	flex: 0 0 auto;
 	color: var(--text-normal);
 	opacity: 0.75;
 	font-weight: normal;
 }
 
 .dict-form-value {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-wrap: anywhere;
 	color: var(--text-normal);
 	opacity: 0.85;
 	font-weight: bold;
@@ -473,9 +491,18 @@
 }
 
 .dict-section {
+	min-width: 0;
 	margin-top: 8px;
 	border-top: 1px dashed var(--background-modifier-border);
 	padding-top: 4px;
+}
+
+.dict-section-title {
+	margin: 0 0 6px;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	font-weight: 600;
+	line-height: 1.4;
 }
 
 .dict-section summary {
@@ -498,10 +525,12 @@
 }
 
 .dict-web-item {
+	min-width: 0;
 	margin-bottom: 6px;
 	padding: 4px 0;
 	line-height: 1.4;
 	font-size: 0.9em;
+	overflow-wrap: anywhere;
 }
 
 .dict-web-key {
@@ -510,6 +539,8 @@
 }
 
 .dict-web-value {
+	min-width: 0;
+	overflow-wrap: anywhere;
 	color: var(--text-normal);
 }
 
@@ -527,12 +558,14 @@
 .dict-example-en {
 	color: var(--text-normal);
 	margin: 0 0 4px 0;
+	overflow-wrap: anywhere;
 }
 
 .dict-example-cn {
 	color: var(--text-muted);
 	font-size: 0.85em;
 	margin: 0;
+	overflow-wrap: anywhere;
 }
 
 /* Settings Panel Styles */
@@ -572,7 +605,14 @@
 }
 
 .lexibridge-source-switcher {
-	display: inline-flex;
+	grid-area: source;
+	box-sizing: border-box;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	align-self: start;
+	flex: 0 0 124px;
+	width: 124px;
+	max-width: 100%;
 	gap: 2px;
 	padding: 2px;
 	border: 1px solid var(--background-modifier-border);
@@ -581,12 +621,19 @@
 }
 
 .lexibridge-source-option {
+	box-sizing: border-box;
+	height: 26px;
+	min-width: 0;
 	padding: 3px 8px;
 	border: 0;
 	border-radius: 3px;
 	background: transparent;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+	line-height: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .lexibridge-source-option.is-active {
@@ -626,14 +673,14 @@
 }
 
 .lexibridge-virtual-link {
-	color: var(--link-color);
+	color: inherit;
 	border-bottom: 1px dotted currentColor;
 	cursor: pointer;
 }
 
 .lexibridge-virtual-link:hover,
 .lexibridge-virtual-link:focus-visible {
-	color: var(--link-color-hover);
+	color: inherit;
 	border-bottom-style: solid;
 	outline: none;
 }
@@ -1123,6 +1170,10 @@
 		min-height: 40px;
 	}
 
+	.lexibridge-query-controls {
+		grid-template-columns: minmax(0, 1fr) 40px;
+	}
+
 	.lexibridge-settings textarea {
 		width: 100%;
 		max-width: 100%;
@@ -1154,6 +1205,19 @@
 
 	.lexibridge-preview-block {
 		max-height: 220px;
+	}
+}
+
+@container lexibridge-dictionary (max-width: 320px) {
+	.dict-header-container {
+		grid-template-areas:
+			"source"
+			"word";
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.dict-header-container .lexibridge-source-switcher {
+		justify-self: end;
 	}
 }
 .lexibridge-ecdict-progress {

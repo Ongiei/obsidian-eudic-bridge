@@ -6,8 +6,10 @@ import { pathToFileURL } from 'node:url';
 import * as esbuild from 'esbuild';
 import { indexedDB } from 'fake-indexeddb';
 import { Buffer } from 'node:buffer';
+import {createHash} from 'node:crypto';
 
 globalThis.indexedDB = indexedDB;
+globalThis.window = globalThis;
 const tmp = mkdtempSync(join(tmpdir(), 'lexibridge-ecdict-service-'));
 const outfile = join(tmp, 'ecdict-service.mjs');
 const obsidianShim = {
@@ -16,7 +18,7 @@ const obsidianShim = {
 		build.onResolve({ filter: /^obsidian$/ }, () => ({ path: 'obsidian-shim', namespace: 'obsidian-shim' }));
 		build.onLoad({ filter: /.*/, namespace: 'obsidian-shim' }, () => ({
 			loader: 'js',
-			contents: 'export async function requestUrl() { throw new Error("Unexpected request"); }',
+				contents: 'export const Platform = {isMobileApp: false}; export async function requestUrl() { throw new Error("Unexpected request"); }',
 		}));
 	},
 };
@@ -39,11 +41,23 @@ const invalidPackage = header + 'the,ðə,,art. 这；那,,,,zk,,,,,\n';
 let sha = 'a'.repeat(40);
 let packageText = validPackage;
 
+function gitBlobSha(text) {
+	const bytes = Buffer.from(text);
+	return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
+let expectedBlobSha = gitBlobSha(packageText);
+
 const request = async options => {
 	if (options.url.includes('/commits?')) {
 		return {
 			status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: '',
 			json: [{ sha }],
+		};
+	}
+	if (options.url.includes('/contents/ecdict.csv')) {
+		return {
+			status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: '',
+			json: {sha: expectedBlobSha},
 		};
 	}
 	const packageBytes = Buffer.from(packageText);
@@ -67,9 +81,19 @@ assert.equal(progress.at(-1).progress, 1);
 
 sha = 'b'.repeat(40);
 packageText = invalidPackage;
+expectedBlobSha = gitBlobSha(packageText);
 await assert.rejects(() => manager.install('jsdelivr', undefined, { aborted: false }), /词条数量异常/);
 assert.equal((await database.lookup('hello')).word, 'hello', 'failed update must preserve active dictionary');
 assert.equal((await manager.checkForUpdate('jsdelivr')).available, true);
+
+packageText = validPackage.replace('你好', '你坏');
+expectedBlobSha = gitBlobSha(validPackage);
+await assert.rejects(() => manager.install('jsdelivr'), /完整性校验失败/);
+assert.equal((await database.lookup('hello')).word, 'hello', 'tampered package must preserve active dictionary');
+
+const mobileManager = new EcdictManager(database, request, 3, 1, true);
+await assert.rejects(() => mobileManager.install('github'), /移动端暂不支持直接安装/);
+assert.equal((await database.lookup('hello')).word, 'hello', 'mobile refusal must preserve active dictionary');
 
 await manager.remove();
 assert.equal((await manager.getStatus()).installed, false);

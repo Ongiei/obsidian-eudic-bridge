@@ -1,3 +1,5 @@
+import {sanitizeExternalUrl} from '../utils/external-content';
+
 export interface AnkiMarkdownRenderer {
 	render(markdown: string): string;
 }
@@ -72,7 +74,13 @@ function inlineMarkdownToHtml(markdown: string): string {
 	const linkPlaceholders: string[] = [];
 	const withLinkPlaceholders = markdown.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, href: string) => {
 		const token = `%%LEXIBRIDGE_LINK_${linkPlaceholders.length}%%`;
-		linkPlaceholders.push(`<a href="${escapeAttribute(href)}">${escapeHtml(label)}</a>`);
+		const safeHref = sanitizeExternalUrl(href, {
+			allowObsidian: true,
+			allowHttpHosts: ['127.0.0.1', 'localhost', '::1'],
+		});
+		linkPlaceholders.push(safeHref
+			? `<a href="${escapeAttribute(safeHref)}">${escapeHtml(label)}</a>`
+			: escapeHtml(label));
 		return token;
 	});
 	const escaped = escapeHtml(withLinkPlaceholders);

@@ -11,6 +11,13 @@ export type SyncAlignmentReason = 'local-missing' | 'cloud-missing' | 'missing-b
 export const STALE_SYNC_THRESHOLD_MS = 14 * 24 * 60 * 60 * 1000;
 export const STALE_SYNC_CHANGE_THRESHOLD = 20;
 
+export class RemoteWriteResultUnknownError extends Error {
+	constructor(readonly operation: string) {
+		super(`远端写入已超时，结果未知：${operation}`);
+		this.name = 'RemoteWriteResultUnknownError';
+	}
+}
+
 export function getSyncDeletionSafetyError(
 	diff: Pick<SyncSetDiff, 'localDeleted' | 'cloudDeleted'>,
 	enabled: boolean,
@@ -112,6 +119,35 @@ export async function withTimeout<T>(promise: Promise<T>, ms: number, operation:
 				window.clearTimeout(timer);
 				reject(err instanceof Error ? err : new Error(String(err)));
 			});
+	});
+}
+
+export async function withRemoteWriteTimeout<T>(
+	promise: Promise<T>,
+	ms: number,
+	operation: string
+): Promise<T> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const timer = window.setTimeout(() => {
+			if (settled) return;
+			settled = true;
+			reject(new RemoteWriteResultUnknownError(operation));
+		}, ms);
+		promise.then(
+			result => {
+				if (settled) return;
+				settled = true;
+				window.clearTimeout(timer);
+				resolve(result);
+			},
+			error => {
+				if (settled) return;
+				settled = true;
+				window.clearTimeout(timer);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			}
+		);
 	});
 }
 

@@ -53,8 +53,11 @@ export class YoudaoProvider implements DictionaryProvider {
 
 	private async waitForTurn(): Promise<void> {
 		const now = this.now();
-		const waitUntil = Math.max(this.nextAllowedAt, this.cooldownUntil);
-		if (waitUntil > now) await this.wait(waitUntil - now);
+		if (this.cooldownUntil > now) {
+			const remainingMinutes = Math.max(1, Math.ceil((this.cooldownUntil - now) / 60000));
+			throw new Error(`有道在线查询仍在冷却中，请约 ${remainingMinutes} 分钟后重试`);
+		}
+		if (this.nextAllowedAt > now) await this.wait(this.nextAllowedAt - now);
 
 		const configuredInterval = this.getMinimumIntervalMs();
 		const interval = Math.min(MAXIMUM_INTERVAL_MS, Math.max(MINIMUM_INTERVAL_MS, configuredInterval));

@@ -8,15 +8,17 @@
 
 > LexiBridge 目前处于 `0.x` 开发阶段，功能和数据结构仍可能调整。
 
-兼容 Obsidian `1.8.7` 及以上版本。词典、笔记和阅读功能支持桌面端与移动端；Anki 导出需要桌面端运行 Anki Desktop 与 AnkiConnect。
+兼容 Obsidian `1.8.7` 及以上版本。词典查询、笔记和阅读功能支持桌面端与移动端；ECDICT 大型数据包安装和 Anki 导出仅在桌面端提供。
 
 ## 数据来源
 
 ### ECDICT 本地词典
 
-ECDICT 是默认释义来源。首次使用时从 [skywind3000/ECDICT](https://github.com/skywind3000/ECDICT) 直接下载约 63 MB 的 `ecdict.csv`，在本机转换并导入约 77 万条英汉词条。设置中可在 GitHub、ghproxy.net、gh-proxy.com、jsDelivr 和 Statically 节点之间测速与切换。
+ECDICT 是默认释义来源。桌面端首次使用时从 [skywind3000/ECDICT](https://github.com/skywind3000/ECDICT) 下载约 63 MB 的 `ecdict.csv`，在本机转换并导入约 77 万条英汉词条。设置中可在 GitHub、ghproxy.net、gh-proxy.com、jsDelivr 和 Statically 节点之间测速与切换。下载完成后会按上游 commit 对应的 Git blob SHA 校验完整内容，镜像内容不一致时拒绝导入并保留当前词典。
 
 数据保存在当前 Obsidian 环境的 IndexedDB 中，不写入 Vault。插件支持校验、检查更新、重新安装和删除；更新失败时会继续保留原有词典。
+
+移动端当前不提供 ECDICT 直接安装，因为整包下载、解码和 IndexedDB 导入会造成较高的峰值内存与卡死风险。移动端的其他词典、笔记和阅读功能不受影响；后续需要分片下载与导入后再开放。
 
 批量迁移只处理 `dict_source: eudic` 或带历史欧路同步提示块的笔记，完全使用本地 ECDICT，不访问在线词典。笔记不写入隐藏管理标记或同步 callout；可在设置中配置一个或多个受保护标题，例如 `## 笔记`，更新时按标题层级保留其下的手写内容。
 
@@ -46,7 +48,7 @@ Anki 是可选的制卡出口。LexiBridge 通过本机 Anki Desktop 的 AnkiCon
 - 在查词侧边栏切换 ECDICT 本地词典和有道在线结果。
 - 识别单词变形并链接到对应词元笔记。
 - 预览后为当前选区、章节或整篇 Markdown 文档添加安全的词库双链。
-- 在阅读模式和 Live Preview 中显示不写入 Markdown 的虚拟链接；悬浮或点击显示紧凑的单词笔记预览，可打开词条笔记，或将本文中的同一词条转换为真实短链接；源码模式不添加装饰。
+- 在阅读模式和 Live Preview 中显示不写入 Markdown、颜色继承正文的虚拟链接；鼠标停留片刻后显示紧凑预览，点击行为可设为显示预览、直接打开单词笔记，或将本文中的同一词条转换为真实短链接；源码模式不添加装饰。
 - 检查并按词条移除当前文档中指向单词文件夹的真实链接。
 - 发现当前文档中的未建词条，选择少量单词后逐个查询并创建笔记。
 - 使用本地 ECDICT 批量迁移已有欧路基础词条。

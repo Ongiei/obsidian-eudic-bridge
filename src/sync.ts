@@ -10,8 +10,10 @@ import {
 	getSyncOperationDeletionSafetyError,
 	getValidFilename,
 	parseEudicExpDefinitions,
+	RemoteWriteResultUnknownError,
 	SyncAlignmentReason,
 	SyncOperationType,
+	withRemoteWriteTimeout,
 	withTimeout,
 } from './utils/sync';
 
@@ -49,6 +51,13 @@ export interface SyncOperation {
 	word: string;
 }
 
+export interface SyncLocalPreparation {
+	type: 'create_folder' | 'rename_folder' | 'move_file';
+	sourcePath?: string;
+	targetPath: string;
+	categoryId?: string;
+}
+
 export type SyncDifferenceType = 'localAdded' | 'cloudAdded' | 'localDeleted' | 'cloudDeleted';
 export type SyncAlignmentMode = 'preserve-both' | 'local-wins' | 'cloud-wins';
 
@@ -74,6 +83,8 @@ export interface SyncDryRunResult {
 	alignmentReasons?: SyncAlignmentReason[];
 	lastSyncTime?: number;
 	requiresAlignment?: boolean;
+	localPreparations?: SyncLocalPreparation[];
+	manifestNeedsRefresh?: boolean;
 }
 
 export interface SyncResult {
@@ -167,7 +178,8 @@ export class SyncService {
 		private settings: LexiBridgeSettings,
 		private eudicService: EudicService,
 		private loadData: () => Promise<unknown>,
-		private saveData: (data: unknown) => Promise<void>
+		private saveData: (data: unknown) => Promise<void>,
+		private apiTimeoutMs: number = API_TIMEOUT_MS
 	) {
 		void this.primeFileContentCache();
 	}
@@ -232,7 +244,7 @@ export class SyncService {
 		const selected = new Set(this.getSyncCategoryIds());
 		const categories = await withTimeout(
 			this.eudicService.getCategories('en'),
-			API_TIMEOUT_MS,
+			this.apiTimeoutMs,
 			'getCategories'
 		);
 		this.categoryIdToName = new Map(categories.map(category => [category.id, category.name]));
@@ -253,47 +265,77 @@ export class SyncService {
 		return result;
 	}
 
-	private async reconcileCategoryFolders(categories: EudicCategory[], manifest: SyncManifest | null): Promise<Map<string, string>> {
-		await this.ensureFolder(this.settings.folderPath);
+	private planCategoryFolders(
+		categories: EudicCategory[],
+		manifest: SyncManifest | null
+	): {
+		folderNames: Map<string, string>;
+		scanPaths: Map<string, string>;
+		preparations: SyncLocalPreparation[];
+		rootFiles: Map<string, Map<string, TFile>>;
+	} {
 		const allocated = this.allocateFolderNames(categories);
+		const scanPaths = new Map<string, string>();
+		const preparations: SyncLocalPreparation[] = [];
+		const rootFiles = new Map<string, Map<string, TFile>>();
+		if (!this.app.vault.getAbstractFileByPath(this.settings.folderPath)) {
+			preparations.push({type: 'create_folder', targetPath: this.settings.folderPath});
+		}
 		for (const category of categories) {
 			const desiredName = allocated.get(category.id)!;
 			const previous = manifest?.categories[category.id];
 			const previousPath = previous ? `${this.settings.folderPath}/${previous.folderName}` : '';
 			const desiredPath = `${this.settings.folderPath}/${desiredName}`;
+			let scanPath = desiredPath;
 			if (previousPath && previousPath !== desiredPath) {
 				const oldFolder = this.app.vault.getAbstractFileByPath(previousPath);
 				if (oldFolder instanceof TFolder && !this.app.vault.getAbstractFileByPath(desiredPath)) {
-					await this.withInternalMutation(() => this.app.fileManager.renameFile(oldFolder, desiredPath));
+					preparations.push({
+						type: 'rename_folder',
+						sourcePath: previousPath,
+						targetPath: desiredPath,
+						categoryId: category.id,
+					});
+					scanPath = previousPath;
 				}
 			}
-			await this.ensureFolder(desiredPath);
+			if (!this.app.vault.getAbstractFileByPath(desiredPath)
+				&& !preparations.some(item => item.type === 'rename_folder' && item.targetPath === desiredPath)) {
+				preparations.push({type: 'create_folder', targetPath: desiredPath, categoryId: category.id});
+			}
+			scanPaths.set(category.id, scanPath);
 		}
-		await this.migrateRootWordFiles(categories, allocated);
-		return allocated;
-	}
-
-	private async migrateRootWordFiles(categories: EudicCategory[], folderNames: Map<string, string>): Promise<void> {
 		const root = this.app.vault.getAbstractFileByPath(this.settings.folderPath);
-		if (!(root instanceof TFolder)) return;
-		const byName = new Map(categories.map(category => [category.name, category.id]));
-		const fallback = this.settings.defaultUploadCategoryId || categories[0]?.id;
-		if (!fallback) return;
-		for (const child of [...root.children]) {
-			if (!(child instanceof TFile) || child.extension !== 'md') continue;
-			const frontmatter = toRecord(this.app.metadataCache.getFileCache(child)?.frontmatter);
-			const lists = frontmatter?.eudic_lists;
-			const preferred = Array.isArray(lists)
-				? lists.map(value => typeof value === 'string' ? byName.get(value) : undefined).find(Boolean)
-				: undefined;
-			const categoryId = preferred || fallback;
-			const folderName = folderNames.get(categoryId);
-			if (!folderName) continue;
-			const targetPath = `${this.settings.folderPath}/${folderName}/${child.name}`;
-			if (!this.app.vault.getAbstractFileByPath(targetPath)) {
-				await this.withInternalMutation(() => this.app.fileManager.renameFile(child, targetPath));
+		if (root instanceof TFolder) {
+			const byName = new Map(categories.map(category => [category.name, category.id]));
+			const fallback = this.settings.defaultUploadCategoryId || categories[0]?.id;
+			if (fallback) {
+				for (const child of [...root.children]) {
+					if (!(child instanceof TFile) || child.extension !== 'md') continue;
+					const frontmatter = toRecord(this.app.metadataCache.getFileCache(child)?.frontmatter);
+					const lists = frontmatter?.eudic_lists;
+					const preferred = Array.isArray(lists)
+						? lists.map(value => typeof value === 'string' ? byName.get(value) : undefined).find(Boolean)
+						: undefined;
+					const categoryId = preferred || fallback;
+					const folderName = allocated.get(categoryId);
+					if (!folderName) continue;
+					const targetPath = `${this.settings.folderPath}/${folderName}/${child.name}`;
+					if (!this.app.vault.getAbstractFileByPath(targetPath)) {
+						preparations.push({
+							type: 'move_file',
+							sourcePath: child.path,
+							targetPath,
+							categoryId,
+						});
+						const categoryFiles = rootFiles.get(categoryId) ?? new Map<string, TFile>();
+						categoryFiles.set(this.getLocalWord(child), child);
+						rootFiles.set(categoryId, categoryFiles);
+					}
+				}
 			}
 		}
+		return {folderNames: allocated, scanPaths, preparations, rootFiles};
 	}
 
 	private async fetchCategoryWords(category: EudicCategory): Promise<Map<string, EudicWord>> {
@@ -302,7 +344,7 @@ export class SyncService {
 		for (let page = 0; page < MAX_CLOUD_PAGES_PER_CATEGORY; page += 1) {
 			const batch = await withTimeout(
 				this.eudicService.getWords(category.id, 'en', page, 100),
-				API_TIMEOUT_MS,
+				this.apiTimeoutMs,
 				`getWords ${category.name} page ${page}`
 			);
 			if (batch.length === 0) return words;
@@ -318,18 +360,23 @@ export class SyncService {
 		throw new Error(`生词本“${category.name}”分页超过安全上限`);
 	}
 
-	private scanLocalFolder(folderName: string): Map<string, TFile> {
+	private scanLocalFolderPath(folderPath: string): Map<string, TFile> {
 		const files = new Map<string, TFile>();
-		const folder = this.app.vault.getAbstractFileByPath(`${this.settings.folderPath}/${folderName}`);
+		const folder = this.app.vault.getAbstractFileByPath(folderPath);
 		if (!(folder instanceof TFolder)) return files;
 		for (const child of getMarkdownFilesRecursively(folder)) {
 			const frontmatter = toRecord(this.app.metadataCache.getFileCache(child)?.frontmatter);
 			const tags = frontmatter?.tags;
 			if (Array.isArray(tags) && (tags.includes('lexibridge/cloud-deleted') || tags.includes('eudicbridge/cloud-deleted'))) continue;
-			const word = (typeof frontmatter?.word === 'string' ? frontmatter.word : child.basename).trim().toLowerCase();
+			const word = this.getLocalWord(child);
 			if (word) files.set(word, child);
 		}
 		return files;
+	}
+
+	private getLocalWord(file: TFile): string {
+		const frontmatter = toRecord(this.app.metadataCache.getFileCache(file)?.frontmatter);
+		return (typeof frontmatter?.word === 'string' ? frontmatter.word : file.basename).trim().toLowerCase();
 	}
 
 	async dryRun(): Promise<SyncDryRunResult> {
@@ -337,6 +384,7 @@ export class SyncService {
 			localAdded: [], cloudAdded: [], localDeleted: [], cloudDeleted: [],
 			errors: [], manifestMissing: false, resetManifest: false, operations: [],
 			differences: [], alignmentReasons: [], lastSyncTime: 0, requiresAlignment: false,
+			localPreparations: [], manifestNeedsRefresh: false,
 		};
 		try {
 			const manifest = await this.loadManifest();
@@ -345,7 +393,8 @@ export class SyncService {
 			if (categories.length === 0) throw new Error('未找到设置中选择的欧路生词本，请重新加载生词本列表');
 			result.manifestMissing = !manifest;
 			result.resetManifest = !manifest;
-			const folderNames = await this.reconcileCategoryFolders(categories, manifest);
+			const folderPlan = this.planCategoryFolders(categories, manifest);
+			result.localPreparations = folderPlan.preparations;
 			const cloudMaps = await Promise.all(categories.map(category => this.fetchCategoryWords(category)));
 			this.categoryContexts.clear();
 			this.cloudWordsWithCategories.clear();
@@ -353,14 +402,29 @@ export class SyncService {
 
 			for (let index = 0; index < categories.length; index += 1) {
 				const category = categories[index]!;
-				const folderName = folderNames.get(category.id)!;
+				const folderName = folderPlan.folderNames.get(category.id)!;
 				const cloudWords = cloudMaps[index]!;
-				const localFiles = this.scanLocalFolder(folderName);
+				const localFiles = this.scanLocalFolderPath(folderPlan.scanPaths.get(category.id)!);
+				for (const [word, file] of folderPlan.rootFiles.get(category.id) ?? []) {
+					if (word) localFiles.set(word, file);
+				}
 				const storedBaseline = manifest?.categories[category.id]?.syncedWords;
 				const baseline = storedBaseline || [...localFiles.keys()].filter(word => cloudWords.has(word));
+				const manifestWords = new Set(baseline);
+				for (const word of localFiles.keys()) {
+					if (cloudWords.has(word)) manifestWords.add(word);
+				}
+				for (const word of baseline) {
+					if (!localFiles.has(word) && !cloudWords.has(word)) manifestWords.delete(word);
+				}
+				if (!storedBaseline || !areSameWords(manifestWords, storedBaseline)
+					|| manifest?.categories[category.id]?.name !== category.name
+					|| manifest?.categories[category.id]?.folderName !== folderName) {
+					result.manifestNeedsRefresh = true;
+				}
 				const context: CategoryContext = {
 					id: category.id, name: category.name, folderName, cloudWords, localFiles,
-					manifestWords: new Set(baseline),
+					manifestWords,
 				};
 				this.categoryContexts.set(category.id, context);
 				for (const [word, file] of localFiles) this.localWordToFile.set(word, file);
@@ -378,7 +442,9 @@ export class SyncService {
 				result.operations!.push(...buildSyncOperationsForAlignment(differences, 'preserve-both'));
 			}
 			result.alignmentReasons = getSyncAlignmentReasons(result, result.manifestMissing, result.lastSyncTime);
-			result.requiresAlignment = result.alignmentReasons.length > 0;
+			result.requiresAlignment = result.alignmentReasons.length > 0
+				|| result.localPreparations.length > 0
+				|| Boolean(result.manifestNeedsRefresh);
 		} catch (error) {
 			result.errors.push(error instanceof Error ? error.message : String(error));
 		}
@@ -426,11 +492,6 @@ export class SyncService {
 		return {...result, operations, errors};
 	}
 
-	async refreshManifestBaseline(): Promise<void> {
-		if (this.categoryContexts.size === 0) await this.dryRun();
-		await this.saveContextsAsManifest();
-	}
-
 	async executeSync(
 		dryRunResult: SyncDryRunResult,
 		progressCallback?: (current: number, total: number, word: string) => void,
@@ -447,9 +508,16 @@ export class SyncService {
 			: this.createLegacyOperations(dryRunResult);
 		let current = 0;
 		let successfulSinceCheckpoint = 0;
+		let localPreparationsCompleted = false;
+		let unresolvedRemoteResult = false;
 		const pendingHistory: Array<Omit<SyncHistoryEntry, 'id' | 'timestamp'>> = [];
 		try {
-			for (const type of ['delete_cloud', 'upload'] as const) {
+			for (const preparation of dryRunResult.localPreparations ?? []) {
+				if (abortSignal?.aborted) break;
+				await this.executeLocalPreparation(preparation);
+			}
+			localPreparationsCompleted = !abortSignal?.aborted;
+			remoteWrites: for (const type of ['delete_cloud', 'upload'] as const) {
 				const batchSize = type === 'upload' ? CLOUD_UPLOAD_BATCH_SIZE : CLOUD_DELETE_BATCH_SIZE;
 				const grouped = groupOperations(operations.filter(operation => operation.type === type));
 				for (const group of grouped) {
@@ -459,8 +527,19 @@ export class SyncService {
 						progressCallback?.(current + 1, operations.length, batch[0]?.word || '');
 						try {
 							const words = batch.map(operation => operation.word);
-							if (type === 'upload') await withTimeout(this.eudicService.addWords(group.categoryId, words), API_TIMEOUT_MS, `addWords ${group.categoryId}`);
-							else await withTimeout(this.eudicService.deleteWords(group.categoryId, words), API_TIMEOUT_MS, `deleteWords ${group.categoryId}`);
+							if (type === 'upload') {
+								await withRemoteWriteTimeout(
+									this.eudicService.addWords(group.categoryId, words),
+									this.apiTimeoutMs,
+									`addWords ${group.categoryId}`
+								);
+							} else {
+								await withRemoteWriteTimeout(
+									this.eudicService.deleteWords(group.categoryId, words),
+									this.apiTimeoutMs,
+									`deleteWords ${group.categoryId}`
+								);
+							}
 							for (const operation of batch) this.applySuccessfulOperation(operation);
 							successfulSinceCheckpoint += batch.length;
 							if (type === 'upload') stats.uploaded += batch.length;
@@ -472,15 +551,32 @@ export class SyncService {
 								successfulSinceCheckpoint = 0;
 							}
 						} catch (error) {
-							stats.failed += batch.length;
-							errors.push(`${type} ${batch[0]?.categoryName}: ${error instanceof Error ? error.message : String(error)}`);
+							const reconciled = error instanceof RemoteWriteResultUnknownError
+								? await this.reconcileUnknownRemoteBatch(type, batch)
+								: false;
+							if (reconciled) {
+								for (const operation of batch) this.applySuccessfulOperation(operation);
+								successfulSinceCheckpoint += batch.length;
+								if (type === 'upload') stats.uploaded += batch.length;
+								else stats.deletedFromCloud += batch.length;
+							} else {
+								stats.failed += batch.length;
+								errors.push(`${type} ${batch[0]?.categoryName}: ${error instanceof Error ? error.message : String(error)}`);
+								if (error instanceof RemoteWriteResultUnknownError) {
+									unresolvedRemoteResult = true;
+									current += batch.length;
+									break remoteWrites;
+								}
+							}
 							current += batch.length;
 						}
 					}
 				}
 			}
 
-			for (const operation of operations.filter(item => item.type === 'download' || item.type === 'trash_local')) {
+			for (const operation of unresolvedRemoteResult
+				? []
+				: operations.filter(item => item.type === 'download' || item.type === 'trash_local')) {
 				if (abortSignal?.aborted) break;
 				progressCallback?.(++current, operations.length, operation.word);
 				try {
@@ -503,7 +599,9 @@ export class SyncService {
 				}
 			}
 			if (pendingHistory.length > 0) await this.appendHistoryBatch(pendingHistory);
-			await this.saveContextsAsManifest(await this.loadManifest());
+			if (localPreparationsCompleted) {
+				await this.saveContextsAsManifest(await this.loadManifest());
+			}
 		} catch (error) {
 			errors.push(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -522,6 +620,38 @@ export class SyncService {
 			...result.localDeleted.map(word => ({type: 'download' as const, categoryId, categoryName, folderName, word})),
 			...result.cloudDeleted.map(word => ({type: 'upload' as const, categoryId, categoryName, folderName, word})),
 		];
+	}
+
+	private async executeLocalPreparation(preparation: SyncLocalPreparation): Promise<void> {
+		if (preparation.type === 'create_folder') {
+			await this.ensureFolder(preparation.targetPath);
+			return;
+		}
+		const source = preparation.sourcePath
+			? this.app.vault.getAbstractFileByPath(preparation.sourcePath)
+			: null;
+		if (!source || this.app.vault.getAbstractFileByPath(preparation.targetPath)) return;
+		await this.withInternalMutation(() => this.app.fileManager.renameFile(source, preparation.targetPath));
+	}
+
+	private async reconcileUnknownRemoteBatch(
+		type: 'delete_cloud' | 'upload',
+		batch: SyncOperation[]
+	): Promise<boolean> {
+		const first = batch[0];
+		if (!first) return false;
+		try {
+			const remoteWords = await this.fetchCategoryWords({
+				id: first.categoryId,
+				name: first.categoryName,
+				language: 'en',
+			});
+			return batch.every(operation => type === 'upload'
+				? remoteWords.has(operation.word.toLowerCase())
+				: !remoteWords.has(operation.word.toLowerCase()));
+		} catch {
+			return false;
+		}
 	}
 
 	private applySuccessfulOperation(operation: SyncOperation): void {
@@ -660,14 +790,42 @@ export class SyncService {
 		const newName = file.name.trim();
 		if (!newName) return;
 		try {
-			await this.eudicService.renameCategory(categoryId, newName, 'en');
+			await withRemoteWriteTimeout(
+				this.eudicService.renameCategory(categoryId, newName, 'en'),
+				this.apiTimeoutMs,
+				`renameCategory ${categoryId}`
+			);
+		} catch (error) {
+			if (!(error instanceof RemoteWriteResultUnknownError)
+				|| !await this.isRemoteCategoryName(categoryId, newName)) {
+				const prefix = error instanceof RemoteWriteResultUnknownError
+					? '欧路生词本重命名结果未知，请刷新生词本状态后再操作'
+					: '欧路生词本重命名失败';
+				new Notice(`${prefix}：${error instanceof Error ? error.message : String(error)}`);
+				return;
+			}
+		}
+		try {
 			if (manifest) {
 				manifest.categories[categoryId] = {...manifest.categories[categoryId]!, name: newName, folderName: newName};
 				await this.writeManifest(manifest);
 			}
 			new Notice(`已将欧路生词本重命名为“${newName}”`);
 		} catch (error) {
-			new Notice(`欧路生词本重命名失败：${error instanceof Error ? error.message : String(error)}`);
+			new Notice(`欧路生词本已重命名，但本地同步记录更新失败：${error instanceof Error ? error.message : String(error)}`);
+		}
+	}
+
+	private async isRemoteCategoryName(categoryId: string, expectedName: string): Promise<boolean> {
+		try {
+			const categories = await withTimeout(
+				this.eudicService.getCategories('en'),
+				this.apiTimeoutMs,
+				`reconcileCategory ${categoryId}`
+			);
+			return categories.some(category => category.id === categoryId && category.name === expectedName);
+		} catch {
+			return false;
 		}
 	}
 
@@ -812,4 +970,9 @@ function groupOperations(operations: SyncOperation[]): Array<{categoryId: string
 
 function createId(): string {
 	return window.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function areSameWords(words: Set<string>, values: string[]): boolean {
+	if (words.size !== values.length) return false;
+	return values.every(value => words.has(value));
 }

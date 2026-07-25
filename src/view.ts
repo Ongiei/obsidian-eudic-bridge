@@ -38,18 +38,32 @@ export class DictionaryView extends ItemView {
 		contentEl.classList.add('lexibridge-sidebar-view');
 		contentEl.classList.remove('lexibridge-popover');
 
-		const searchBarEl = contentEl.createDiv({ cls: 'lexibridge-search-box' });
+		const searchBarEl = contentEl.createDiv({
+			cls: 'lexibridge-search-box',
+			attr: {
+				role: 'search',
+				'aria-label': '词典搜索',
+			},
+		});
 
-		const inputWrapper = searchBarEl.createDiv({ cls: 'lexibridge-input-wrapper' });
+		const queryControls = searchBarEl.createDiv({ cls: 'lexibridge-query-controls' });
+		const inputWrapper = queryControls.createDiv({ cls: 'lexibridge-input-wrapper' });
 
 		this.searchInput = inputWrapper.createEl('input', {
 			type: 'text',
 			cls: 'lexibridge-search-input',
-			attr: { placeholder: '输入单词...' }
+			attr: {
+				placeholder: '输入单词...',
+				'aria-label': '要查询的单词',
+			},
 		});
 
-		const searchButton = inputWrapper.createEl('button', {
-			cls: 'lexibridge-search-btn-inside'
+		const searchButton = queryControls.createEl('button', {
+			cls: 'lexibridge-search-btn-inside',
+			attr: {
+				type: 'button',
+				'aria-label': '搜索',
+			},
 		});
 		setIcon(searchButton, 'search');
 		setTooltip(searchButton, '搜索');
@@ -59,7 +73,10 @@ export class DictionaryView extends ItemView {
 
 		const createNoteButton = searchBarEl.createEl('button', {
 			cls: 'lexibridge-action-btn',
-			attr: { 'aria-label': '创建词元笔记' }
+			attr: {
+				type: 'button',
+				'aria-label': '创建词元笔记',
+			},
 		});
 		setIcon(createNoteButton, 'file-plus');
 		setTooltip(createNoteButton, '创建词元笔记');
@@ -70,7 +87,13 @@ export class DictionaryView extends ItemView {
 				}
 		});
 
-		this.resultContainer = contentEl.createDiv({ cls: 'dict-result-container' });
+		this.resultContainer = contentEl.createDiv({
+			cls: 'dict-result-container',
+			attr: {
+				'aria-live': 'polite',
+				'aria-atomic': 'false',
+			},
+		});
 
 		const placeholder = this.resultContainer.createDiv({ cls: 'lexibridge-message' });
 		placeholder.createSpan({ text: '输入一个单词开始查询' });
@@ -115,7 +138,7 @@ export class DictionaryView extends ItemView {
 			if (!result) {
 				this.resultContainer.empty();
 				this.currentSource = this.selectedSource;
-				const switcher = this.resultContainer.createDiv({cls: 'lexibridge-source-switcher'});
+				const switcher = this.createSourceSwitcher(this.resultContainer);
 				this.renderSourceButton(switcher, 'ecdict', 'ECDICT');
 				this.renderSourceButton(switcher, 'youdao', '有道');
 				const message = this.resultContainer.createEl('p');
@@ -139,7 +162,7 @@ export class DictionaryView extends ItemView {
 			if (requestId !== this.searchRequestId) return;
 			this.resultContainer.empty();
 			this.currentSource = this.selectedSource;
-			const switcher = this.resultContainer.createDiv({cls: 'lexibridge-source-switcher'});
+			const switcher = this.createSourceSwitcher(this.resultContainer);
 			this.renderSourceButton(switcher, 'ecdict', 'ECDICT');
 			this.renderSourceButton(switcher, 'youdao', '有道');
 			const message = this.resultContainer.createEl('p');
@@ -154,14 +177,14 @@ export class DictionaryView extends ItemView {
 
 		const headerContainer = container.createDiv({ cls: 'dict-header-container' });
 
+		const sourceSwitcher = this.createSourceSwitcher(headerContainer);
+		this.renderSourceButton(sourceSwitcher, 'ecdict', 'ECDICT');
+		this.renderSourceButton(sourceSwitcher, 'youdao', '有道');
+
 		const headerLeft = headerContainer.createDiv({ cls: 'dict-header-left' });
 
 		const title = headerLeft.createEl('h1', { cls: 'dict-title' });
 		title.textContent = word;
-		const sourceSwitcher = headerLeft.createDiv({cls: 'lexibridge-source-switcher'});
-		this.renderSourceButton(sourceSwitcher, 'ecdict', 'ECDICT');
-		this.renderSourceButton(sourceSwitcher, 'youdao', '有道');
-
 		renderPhoneticButtons(headerLeft, entry);
 
 		if (entry.definitions.length > 0) {
@@ -203,11 +226,24 @@ export class DictionaryView extends ItemView {
 		this.renderExtendedData(container, entry);
 	}
 
+	private createSourceSwitcher(container: HTMLElement): HTMLElement {
+		return container.createDiv({
+			cls: 'lexibridge-source-switcher',
+			attr: {
+				role: 'group',
+				'aria-label': '词典来源',
+			},
+		});
+	}
+
 	private renderSourceButton(container: HTMLElement, source: DictionaryProviderId, label: string): void {
 		const button = container.createEl('button', {
 			cls: `lexibridge-source-option${this.currentSource === source ? ' is-active' : ''}`,
 			text: label,
-			attr: {'aria-pressed': String(this.currentSource === source)},
+			attr: {
+				type: 'button',
+				'aria-pressed': String(this.currentSource === source),
+			},
 		});
 		button.addEventListener('click', () => {
 			if (source === this.currentSource) return;

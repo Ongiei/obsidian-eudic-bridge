@@ -60,6 +60,11 @@ export function normalizeSettings(loaded: unknown): LexiBridgeSettings {
 		: [];
 	settings.autoLinkSkipWordFolder = settings.autoLinkSkipWordFolder !== false;
 	settings.virtualLinksEnabled = settings.virtualLinksEnabled === true;
+	if (settings.virtualLinkClickAction !== 'open-note'
+		&& settings.virtualLinkClickAction !== 'convert-link'
+		&& settings.virtualLinkClickAction !== 'preview') {
+		settings.virtualLinkClickAction = DEFAULT_SETTINGS.virtualLinkClickAction;
+	}
 	settings.selectionLookupSource = settings.selectionLookupSource === 'youdao' ? 'youdao' : 'ecdict';
 	settings.syncDeletionProtection = settings.syncDeletionProtection !== false;
 	settings.syncMaxDeletionCount = Number.isInteger(settings.syncMaxDeletionCount)

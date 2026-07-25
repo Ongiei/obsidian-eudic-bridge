@@ -187,6 +187,30 @@ assert.equal(cleanup.occurrences.length, 2);
 const cleaned = service.applyPlan(cleanup, new Set(cleanup.candidates.map(item => item.target)));
 assert.equal(cleaned, 'Keep [[Other]], ![[test]], installed, and test.');
 
+const protectedCleanupSource = `---
+alias: [[install]]
+---
+## Skip
+[[install]]
+## Keep
+\`[[install]]\`
+\`\`\`md
+[[install]]
+\`\`\`
+<!-- [[install]] -->
+![[install]]
+[label](https://example.com/[[install]])
+[[install|ordinary]]
+`;
+const protectedCleanup = service.createCleanupPlan(protectedCleanupSource);
+assert.equal(protectedCleanup.occurrences.length, 1);
+assert.equal(protectedCleanup.occurrences[0].text, 'ordinary');
+const protectedCleaned = service.applyPlan(protectedCleanup, new Set(['LexiBridge/install']));
+assert.ok(protectedCleaned.includes('alias: [[install]]'));
+assert.ok(protectedCleaned.includes('<!-- [[install]] -->'));
+assert.ok(protectedCleaned.includes('![[install]]'));
+assert.ok(protectedCleaned.endsWith('ordinary\n'));
+
 const excludedPlan = service.createPlan('## Skip\ninstall test\n## Keep\ninstall test');
 assert.equal(excludedPlan.occurrences.length, 2);
 

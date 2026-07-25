@@ -3,6 +3,11 @@
 .idea/
 *.iml
 
+# Local agent and design-tool state
+.agents/
+.codex/
+.impeccable/
+
 # npm
 node_modules/
 

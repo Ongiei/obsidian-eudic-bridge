@@ -48,9 +48,10 @@ await esbuild.build({
 				syncDeletionProtection: true, syncMaxDeletionCount: 50,
 			};
 
-			function createApp(initialFiles = {}) {
-				const nodes = new Map();
-				const contents = new Map(Object.entries(initialFiles));
+				function createApp(initialFiles = {}) {
+					const nodes = new Map();
+					const contents = new Map(Object.entries(initialFiles));
+					const mutations = [];
 				const root = new TFolder('LexiBridge', []);
 				nodes.set('LexiBridge', root);
 				function ensureFolder(path) {
@@ -69,22 +70,23 @@ await esbuild.build({
 					parent.children.push(file);
 				}
 				return {
-					nodes, contents,
-					vault: {
+						nodes, contents, mutations,
+						vault: {
 						adapter: {exists: async path => nodes.has(path)},
 						getAbstractFileByPath: path => nodes.get(path) || null,
-						createFolder: async path => ensureFolder(path),
-						create: async (path, content) => {
+							createFolder: async path => { mutations.push(['createFolder', path]); return ensureFolder(path); },
+							create: async (path, content) => {
+								mutations.push(['create', path]);
 							const parent = ensureFolder(path.split('/').slice(0, -1).join('/'));
 							const file = new TFile(path); nodes.set(path, file); contents.set(path, content); parent.children.push(file); return file;
 						},
 						read: async file => contents.get(file.path) || '',
-						process: async (file, fn) => contents.set(file.path, fn(contents.get(file.path) || '')),
+							process: async (file, fn) => { mutations.push(['process', file.path]); contents.set(file.path, fn(contents.get(file.path) || '')); },
 					},
 					metadataCache: {getFileCache: file => ({frontmatter: {word: file.basename}})},
 					fileManager: {
-						renameFile: async (file, target) => { nodes.delete(file.path); file.path = target; file.name = target.split('/').pop(); nodes.set(target, file); },
-						trashFile: async file => { nodes.delete(file.path); },
+							renameFile: async (file, target) => { mutations.push(['rename', file.path, target]); nodes.delete(file.path); file.path = target; file.name = target.split('/').pop(); nodes.set(target, file); },
+							trashFile: async file => { mutations.push(['trash', file.path]); nodes.delete(file.path); },
 					},
 				};
 			}
@@ -97,7 +99,29 @@ await esbuild.build({
 					getCategories: async () => [{id: 'a', name: 'Alpha'}, {id: 'b', name: 'Beta'}],
 					getWords: async id => { getWordsCalls.push(id); return id === 'a' ? [{word: 'cloud', exp: 'n. cloud'}] : [{word: 'shared', exp: 'adj. shared'}]; },
 				}, async () => stored, async data => { stored = data; });
-				const dryRun = await service.dryRun();
+					const dryRun = await service.dryRun();
+					const dryRunMutations = [...app.mutations];
+					const dryRunStored = structuredClone(stored);
+
+					const migrationApp = createApp({
+						'LexiBridge/Old/existing.md': '# existing',
+						'LexiBridge/root.md': '# root',
+					});
+					let migrationStored = {syncManifest: {version: 2, lastSyncTime: 1, categories: {
+						a: {name: 'Old', folderName: 'Old', syncedWords: ['existing', 'root']},
+					}}};
+					const migrationService = new SyncService(migrationApp, {...settings, syncCategoryIds: ['a']}, {
+						getCategories: async () => [{id: 'a', name: 'New'}],
+						getWords: async () => [{word: 'existing', exp: ''}, {word: 'root', exp: ''}],
+						addWords: async () => {},
+						deleteWords: async () => {},
+					}, async () => migrationStored, async data => { migrationStored = data; });
+					const migrationPlan = await migrationService.dryRun();
+					const migrationDryRunMutations = [...migrationApp.mutations];
+					const migrationDryRunStored = structuredClone(migrationStored);
+					const migrationExecution = await migrationService.executeSync(
+						migrationService.createAlignmentPlan(migrationPlan, 'preserve-both')
+					);
 
 				const reconciliationApp = createApp({'LexiBridge/Alpha/cloud-deleted.md': '# cloud deleted locally'});
 				let reconciliationStored = {syncManifest: {version: 2, lastSyncTime: 1, categories: {
@@ -161,8 +185,30 @@ await esbuild.build({
 				}, async () => renameStored, async data => { renameStored = data; });
 				await renameService.handleFileRenamed(alphaFolder, 'LexiBridge/Alpha');
 
-				const generatedSyncMarkdown = uploadService['generateMarkdown']('dec', 'n. dec', ['Alpha']);
-				return {dryRun, reconciliationDryRun, preserveBothPlan, localWinsPlan, cloudWinsPlan, getWordsCalls, folders: [...app.nodes.keys()], uploadBatches, uploadResult, retryResult, retryStored, restored, restoredContent: deleteApp.contents.get(deletePath), renamedTo, renameStored, generatedSyncMarkdown};
+					const generatedSyncMarkdown = uploadService['generateMarkdown']('dec', 'n. dec', ['Alpha']);
+
+					const unknownApp = createApp({'LexiBridge/Alpha/late.md': '# late'});
+					let unknownStored = {syncManifest: {version: 2, lastSyncTime: 1, categories: {
+						a: {name: 'Alpha', folderName: 'Alpha', syncedWords: []},
+					}}};
+					const remoteWords = new Set();
+					let unknownAddCalls = 0;
+					const unknownService = new SyncService(unknownApp, {...settings, syncCategoryIds: ['a']}, {
+						getCategories: async () => [{id: 'a', name: 'Alpha'}],
+						getWords: async () => [...remoteWords].map(word => ({word, exp: ''})),
+						addWords: async (_id, words) => new Promise(resolve => setTimeout(() => {
+							unknownAddCalls += 1;
+							for (const word of words) remoteWords.add(word);
+							resolve('ok');
+						}, 20)),
+						deleteWords: async () => {},
+					}, async () => unknownStored, async data => { unknownStored = data; }, 1);
+					const unknownPlan = await unknownService.dryRun();
+					const unknownResult = await unknownService.executeSync(unknownPlan);
+					await new Promise(resolve => setTimeout(resolve, 30));
+					const recoveryPlan = await unknownService.dryRun();
+
+					return {dryRun, dryRunMutations, dryRunStored, migrationPlan, migrationDryRunMutations, migrationDryRunStored, migrationExecution, migrationMutations: migrationApp.mutations, migrationStored, reconciliationDryRun, preserveBothPlan, localWinsPlan, cloudWinsPlan, getWordsCalls, folders: [...app.nodes.keys()], uploadBatches, uploadResult, retryResult, retryStored, restored, restoredContent: deleteApp.contents.get(deletePath), renamedTo, renameStored, generatedSyncMarkdown, unknownResult, unknownAddCalls, unknownStored, recoveryPlan};
 			}
 		`,
 		resolveDir: process.cwd(), sourcefile: 'sync-service-test.ts', loader: 'ts',
@@ -175,7 +221,20 @@ const result = await run();
 
 assert.deepEqual(result.getWordsCalls.sort(), ['a', 'b']);
 assert.ok(result.folders.includes('LexiBridge/Alpha'));
-assert.ok(result.folders.includes('LexiBridge/Beta'));
+assert.ok(!result.folders.includes('LexiBridge/Beta'), 'dryRun must not create category folders');
+assert.deepEqual(result.dryRunMutations, [], 'dryRun and user cancellation must not mutate the Vault');
+assert.deepEqual(result.dryRunStored, {}, 'dryRun and user cancellation must not write the manifest');
+assert.ok(result.dryRun.localPreparations.some(item => item.type === 'create_folder' && item.targetPath === 'LexiBridge/Beta'));
+assert.deepEqual(result.migrationDryRunMutations, []);
+assert.deepEqual(result.migrationDryRunStored.syncManifest.categories.a.folderName, 'Old');
+assert.ok(result.migrationPlan.localPreparations.some(item =>
+	item.type === 'rename_folder' && item.sourcePath === 'LexiBridge/Old' && item.targetPath === 'LexiBridge/New'));
+assert.ok(result.migrationPlan.localPreparations.some(item =>
+	item.type === 'move_file' && item.sourcePath === 'LexiBridge/root.md' && item.targetPath === 'LexiBridge/New/root.md'));
+assert.equal(result.migrationExecution.success, true);
+assert.ok(result.migrationMutations.some(item => item[0] === 'rename' && item[1] === 'LexiBridge/Old'));
+assert.ok(result.migrationMutations.some(item => item[0] === 'rename' && item[1] === 'LexiBridge/root.md'));
+assert.equal(result.migrationStored.syncManifest.categories.a.folderName, 'New');
 assert.ok(result.dryRun.operations.some(op => op.type === 'upload' && op.categoryId === 'a' && op.word === 'local'));
 assert.ok(result.dryRun.operations.some(op => op.type === 'download' && op.categoryId === 'a' && op.word === 'cloud'));
 assert.ok(result.dryRun.operations.some(op => op.type === 'download' && op.categoryId === 'b' && op.word === 'shared'));
@@ -212,5 +271,11 @@ assert.deepEqual(result.renamedTo, ['a', 'Renamed']);
 assert.equal(result.renameStored.syncManifest.categories.a.name, 'Renamed');
 assert.ok(!result.generatedSyncMarkdown.includes('[!info] 欧路同步'));
 assert.ok(!result.generatedSyncMarkdown.includes('obsidian://lexibridge'));
+assert.equal(result.unknownResult.success, false);
+assert.match(result.unknownResult.errors[0], /结果未知/);
+assert.equal(result.unknownAddCalls, 1, 'unknown remote write must not be automatically retried');
+assert.ok(!result.unknownStored.syncManifest.categories.a.syncedWords.includes('late'), 'unknown result must not update manifest');
+assert.equal(result.recoveryPlan.operations.filter(item => item.type === 'upload' && item.word === 'late').length, 0, 'late remote success must reconcile without duplicate upload');
+assert.equal(result.recoveryPlan.manifestNeedsRefresh, true);
 
 console.log('Sync service tests passed');

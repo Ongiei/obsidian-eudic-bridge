@@ -75,10 +75,10 @@ export class SyncReconciliationModal extends Modal {
 		this.contentEl.empty();
 		this.contentEl.addClass('lexibridge-sync-reconciliation-modal');
 		this.contentEl.createEl('h2', {text: '同步对齐'});
-		this.contentEl.createEl('p', {
-			cls: 'lexibridge-sync-reconciliation-intro',
-			text: '检测到删除、缺失或较长时间未同步后的数据分叉。请先查看全部差异，再选择一个统一方案。不会逐项执行不同决定。',
-		});
+			this.contentEl.createEl('p', {
+				cls: 'lexibridge-sync-reconciliation-intro',
+				text: '检测到数据差异、同步基线更新或本地目录迁移。请先查看完整计划，再选择一个统一方案；确认前不会修改本地、云端或同步记录。',
+			});
 
 		const reasons = this.result.alignmentReasons ?? [];
 		if (reasons.length > 0) {
@@ -139,6 +139,24 @@ export class SyncReconciliationModal extends Modal {
 			`本地移入回收站 ${counts.trash_local}`,
 		];
 		this.planEl.createEl('p', {cls: 'lexibridge-sync-reconciliation-summary', text: `计划：${summary.join('，')}`});
+		const preparations = this.result.localPreparations ?? [];
+		if (preparations.length > 0) {
+			const counts = {
+				create: preparations.filter(item => item.type === 'create_folder').length,
+				rename: preparations.filter(item => item.type === 'rename_folder').length,
+				move: preparations.filter(item => item.type === 'move_file').length,
+			};
+			this.planEl.createEl('p', {
+				cls: 'lexibridge-sync-reconciliation-summary',
+				text: `本地准备：创建文件夹 ${counts.create}，重命名文件夹 ${counts.rename}，迁移词条 ${counts.move}`,
+			});
+		}
+		if (this.result.manifestNeedsRefresh) {
+			this.planEl.createEl('p', {
+				cls: 'lexibridge-sync-reconciliation-summary',
+				text: '同步完成后更新本地同步基线 1 项',
+			});
+		}
 		this.planEl.toggleClass('is-destructive', counts.delete_cloud + counts.trash_local > 0);
 	}
 
@@ -169,6 +187,22 @@ export class SyncReconciliationModal extends Modal {
 					text: ACTION_LABELS[this.mode][difference.type],
 				});
 				item.createDiv({cls: 'lexibridge-sync-reconciliation-path', text: difference.path});
+			}
+		}
+		const preparations = this.result.localPreparations ?? [];
+		if (preparations.length > 0) {
+			const details = this.differenceListEl.createEl('details', {attr: {open: ''}});
+			details.createEl('summary', {text: `本地文件准备 (${preparations.length})`});
+			const list = details.createEl('ul', {cls: 'lexibridge-sync-reconciliation-list'});
+			for (const preparation of preparations) {
+				const label = preparation.type === 'create_folder'
+					? '创建文件夹'
+					: preparation.type === 'rename_folder' ? '重命名文件夹' : '迁移词条文件';
+				list.createEl('li', {
+					text: preparation.sourcePath
+						? `${label}：${preparation.sourcePath} → ${preparation.targetPath}`
+						: `${label}：${preparation.targetPath}`,
+				});
 			}
 		}
 	}

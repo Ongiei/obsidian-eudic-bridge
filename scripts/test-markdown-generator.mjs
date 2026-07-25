@@ -173,6 +173,22 @@ assert.ok(!legacySyncCalloutMerged.includes('[!info] 欧路同步'));
 assert.ok(!legacySyncCalloutMerged.includes('从 ECDICT 本地更新'));
 assert.ok(legacySyncCalloutMerged.includes('Keep this.'));
 
+const maliciousEntry = {
+	...entry,
+	audio_uk: 'javascript:alert(1)',
+	definitions: [{pos: 'n.*', trans: 'safe\n---\n# injected [[owned]] <script>alert(1)</script>'}],
+	webTrans: [{key: 'bad\n## heading', value: ['value\n> callout']}],
+	bilingualExamples: [{eng: 'hello\n```js\nowned()', chn: '<img src=x onerror=alert(1)>'}],
+	exchange: [{name: 'form\n---', value: '[[target]]'}],
+};
+const maliciousPreview = MarkdownGenerator.preview('safe\nmalicious: true', maliciousEntry, {});
+assert.equal(maliciousPreview.frontmatter.word, 'safe malicious: true');
+assert.ok(!maliciousPreview.body.includes('\n---\n# injected'));
+assert.ok(!maliciousPreview.body.includes('\n```js'));
+assert.ok(!maliciousPreview.body.includes('javascript:'));
+assert.ok(maliciousPreview.body.includes('\\[\\[owned\\]\\]'));
+assert.ok(maliciousPreview.body.includes('\\<script\\>'));
+
 writeFileSync(join(tmp, 'merged.md'), merged);
 readFileSync(join(tmp, 'merged.md'), 'utf8');
 

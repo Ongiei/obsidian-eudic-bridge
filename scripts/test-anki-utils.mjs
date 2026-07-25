@@ -46,14 +46,14 @@ const obsidianShim = {
 await esbuild.build({
 	stdin: {
 		contents: `
-			import { AnkiConnectClient } from './src/anki/anki-connect-client.ts';
+				import { AnkiConnectClient, AnkiConnectUnknownResultError } from './src/anki/anki-connect-client.ts';
 			import { AnkiCardMapper } from './src/anki/card-mapper.ts';
 			import { AnkiSyncPlanner } from './src/anki/sync-planner.ts';
 			import { AnkiSyncService } from './src/anki/sync-service.ts';
 			import { markdownToHtml } from './src/anki/markdown-renderer.ts';
 			import { scanHeadingSections } from './src/anki/word-note-repository.ts';
 			import { TFile, TFolder } from 'obsidian';
-			export { AnkiConnectClient, AnkiCardMapper, AnkiSyncPlanner, AnkiSyncService, TFile, TFolder, markdownToHtml, scanHeadingSections };
+				export { AnkiConnectClient, AnkiConnectUnknownResultError, AnkiCardMapper, AnkiSyncPlanner, AnkiSyncService, TFile, TFolder, markdownToHtml, scanHeadingSections };
 		`,
 		resolveDir: process.cwd(),
 		sourcefile: 'anki-utils-test.ts',
@@ -66,7 +66,7 @@ await esbuild.build({
 	plugins: [obsidianShim],
 });
 
-const { AnkiConnectClient, AnkiCardMapper, AnkiSyncPlanner, AnkiSyncService, TFile, TFolder, markdownToHtml, scanHeadingSections } = await import(pathToFileURL(outfile).href);
+const { AnkiConnectClient, AnkiConnectUnknownResultError, AnkiCardMapper, AnkiSyncPlanner, AnkiSyncService, TFile, TFolder, markdownToHtml, scanHeadingSections } = await import(pathToFileURL(outfile).href);
 
 const client = new AnkiConnectClient('http://127.0.0.1:8765', 100, async request => {
 	assert.equal(request.action, 'version');
@@ -83,6 +83,18 @@ await modelClient.updateModelStyling('LexiBridge Vocabulary', '.card {}');
 assert.deepEqual(modelActions.map(request => request.action), ['updateModelTemplates', 'updateModelStyling']);
 assert.equal(modelActions[0].params.model.name, 'LexiBridge Vocabulary');
 assert.equal(markdownToHtml('A **bold** [link](obsidian://open?vault=V&file=A.md)'), '<p>A <strong>bold</strong> <a href="obsidian://open?vault=V&amp;file=A.md">link</a></p>');
+for (const scheme of ['javascript:alert(1)', 'data:text/html,owned', 'file:///etc/passwd']) {
+	const rendered = markdownToHtml(`[unsafe](${scheme})`);
+	assert.doesNotMatch(rendered, /<a href=/);
+	assert.match(rendered, /unsafe/);
+}
+await assert.rejects(
+	() => new AnkiConnectClient('http://anki.example.com:8765', 100, async () => ({result: 6, error: null})).testConnection(),
+	/必须使用 HTTPS/
+);
+await assert.doesNotReject(
+	() => new AnkiConnectClient('https://anki.example.com', 100, async () => ({result: 6, error: null})).testConnection()
+);
 const nestedMarkdown = '## 释义\nmain\n### 子项\nnested\n## 例句\nexample';
 const nestedSections = scanHeadingSections(nestedMarkdown);
 const definitionSection = nestedSections.find(section => section.title === '释义');
@@ -108,6 +120,11 @@ const timeoutClient = new AnkiConnectClient('http://127.0.0.1:8765', 1, async ()
 	setTimeout(() => resolve({ result: 6, error: null }), 20);
 }));
 await assert.rejects(() => timeoutClient.testConnection(), /超时/);
+const unknownWriteClient = new AnkiConnectClient('http://127.0.0.1:8765', 1, async () => new Promise(resolve => {
+	setTimeout(() => resolve({result: [123], error: null}), 20);
+}));
+await assert.rejects(() => unknownWriteClient.addNotes([]), error =>
+	error?.name === 'AnkiConnectUnknownResultError' && /结果未知/.test(error.message));
 
 const mapper = new AnkiCardMapper({
 	ankiSourceId: 'Source A',
@@ -321,6 +338,21 @@ const secondStatefulSync = await statefulService.executeFullSync();
 assert.equal(secondStatefulSync.stats.added, 0);
 assert.equal(secondStatefulSync.stats.unchanged, 1);
 assert.equal(statefulClient.notes.size, 1, 'repeat sync must not duplicate cards');
+
+const unknownStatefulClient = createStatefulClient();
+const successfulUnknownAdd = unknownStatefulClient.addNotes.bind(unknownStatefulClient);
+unknownStatefulClient.addNotes = async payloads => {
+	await successfulUnknownAdd(payloads);
+	throw new AnkiConnectUnknownResultError('addNotes', 1);
+};
+const unknownStatefulService = new AnkiSyncService({vault: fakeVault}, () => settings, () => unknownStatefulClient);
+const reconciledUnknownAdd = await unknownStatefulService.executeFullSync();
+assert.equal(reconciledUnknownAdd.success, true);
+assert.equal(reconciledUnknownAdd.stats.added, 1);
+assert.equal(unknownStatefulClient.addCalls, 1);
+const repeatAfterUnknownAdd = await unknownStatefulService.executeFullSync();
+assert.equal(repeatAfterUnknownAdd.stats.added, 0);
+assert.equal(unknownStatefulClient.addCalls, 1, 'reconciled unknown add must not be sent twice');
 
 const renamedFile = new TFile('LexiBridge/renamed-test.md');
 const renamedVault = {
@@ -553,5 +585,21 @@ const incompatibleClient = {
 };
 const incompatibleService = new AnkiSyncService({ vault: fakeVault }, () => settings, () => incompatibleClient);
 await assert.rejects(() => incompatibleService.executeFullSync(), /字段不兼容/);
+
+let releaseConcurrent;
+const concurrentGate = new Promise(resolve => { releaseConcurrent = resolve; });
+const concurrentClient = {
+	...fakeClient,
+	addedPayloads: [],
+	async testConnection() {
+		await concurrentGate;
+		return 6;
+	},
+};
+const concurrentService = new AnkiSyncService({vault: fakeVault}, () => settings, () => concurrentClient);
+const firstConcurrentRun = concurrentService.executeFullSync();
+await assert.rejects(() => concurrentService.executeCurrentFile(wordFile), /正在进行中/);
+releaseConcurrent();
+await assert.doesNotReject(() => firstConcurrentRun);
 
 console.log('Anki utility tests passed');

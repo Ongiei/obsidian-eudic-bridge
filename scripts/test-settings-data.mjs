@@ -26,7 +26,8 @@ const obsidianShim = {
 				export class PluginSettingTab {}
 				export class Setting {}
 				export class TAbstractFile {}
-				export class TFolder {}
+					export class TFolder {}
+					export const Platform = {isDesktopApp: true, isMobileApp: false};
 				export function parseYaml() { return {}; }
 				export function stringifyYaml() { return ''; }
 				export function requestUrl() { return {}; }
@@ -74,6 +75,10 @@ assert.equal(normalizeSettings({ autoLinkMinWordLength: 0 }).autoLinkMinWordLeng
 assert.deepEqual(normalizeSettings({ autoLinkIgnoredWords: ['The', 'the', '', 1] }).autoLinkIgnoredWords, ['the']);
 assert.equal(normalizeSettings({}).autoLinkSkipBlockquotes, true);
 assert.equal(normalizeSettings({ virtualLinksEnabled: true }).virtualLinksEnabled, true);
+assert.equal(normalizeSettings({}).virtualLinkClickAction, 'preview');
+assert.equal(normalizeSettings({virtualLinkClickAction: 'open-note'}).virtualLinkClickAction, 'open-note');
+assert.equal(normalizeSettings({virtualLinkClickAction: 'convert-link'}).virtualLinkClickAction, 'convert-link');
+assert.equal(normalizeSettings({virtualLinkClickAction: 'invalid'}).virtualLinkClickAction, 'preview');
 assert.deepEqual(normalizeSettings({ autoLinkExcludedHeadings: ['## Code', 'Code', 1] }).autoLinkExcludedHeadings, ['Code']);
 assert.equal(normalizeSettings({ ecdictDownloadSource: 'invalid' }).ecdictDownloadSource, 'jsdelivr');
 assert.ok(!normalizeSettings({

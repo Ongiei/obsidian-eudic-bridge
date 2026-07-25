@@ -39,7 +39,17 @@ export function createLivePreviewVirtualLinks(plugin: LexiBridgePlugin) {
 				const target = element?.dataset.target;
 				const sourcePath = element?.dataset.sourcePath;
 				if (!element || !word || !target) return false;
+				const relatedTarget = event.relatedTarget as Node | null;
+				if (relatedTarget && element.contains(relatedTarget)) return false;
 				plugin.showVirtualLinkHover(element, word, target, sourcePath);
+				return false;
+			},
+			mouseout(event) {
+				const element = (event.target as HTMLElement).closest<HTMLElement>('.lexibridge-virtual-link-live');
+				if (!element) return false;
+				const relatedTarget = event.relatedTarget as Node | null;
+				if (relatedTarget && element.contains(relatedTarget)) return false;
+				plugin.cancelVirtualLinkHover(element);
 				return false;
 			},
 		},

@@ -13,6 +13,7 @@ export interface EcdictInstallation {
 	key: typeof INSTALLATION_KEY;
 	activeStore: EcdictEntryStore;
 	sourceSha: string;
+	sourceBlobSha?: string;
 	packageSize: number;
 	entryCount: number;
 	installedAt: number;
@@ -95,7 +96,7 @@ export class EcdictDatabase {
 
 	private open(): Promise<IDBDatabase> {
 		if (this.databasePromise) return this.databasePromise;
-		this.databasePromise = new Promise((resolve, reject) => {
+		const opening = new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
 			request.onupgradeneeded = () => {
 				const database = request.result;
@@ -111,6 +112,10 @@ export class EcdictDatabase {
 			request.onsuccess = () => resolve(request.result);
 			request.onerror = () => reject(request.error || new Error('无法打开 ECDICT 本地数据库'));
 			request.onblocked = () => reject(new Error('ECDICT 数据库被其他窗口占用'));
+		});
+		this.databasePromise = opening.catch(error => {
+			this.databasePromise = null;
+			throw error;
 		});
 		return this.databasePromise;
 	}

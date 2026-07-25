@@ -1,7 +1,7 @@
 import {App, TFolder} from 'obsidian';
 import {LexiBridgeSettings} from './settings';
 import {getLemma} from './lemmatizer';
-import {getFenceMarker, isReferenceDefinition, splitProtectedMarkdown} from './utils/auto-link';
+import {getMarkdownEditSegments} from './utils/auto-link';
 import {getMarkdownFilesRecursively} from './utils/vault-files';
 
 const WORD_PATTERN = /\b[a-zA-Z]+(?:[-'][a-zA-Z]+)*\b/g;
@@ -79,70 +79,35 @@ export class AutoLinkService {
 		const ignored = new Set(this.settings.autoLinkIgnoredWords);
 		const linkedTargets = new Set<string>();
 		const occurrences: AutoLinkOccurrence[] = [];
-		const frontmatterEnd = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0].length ?? 0;
-		let activeFence: {character: '`' | '~'; length: number} | null = null;
-		let inHtmlComment = false;
-		let excludedHeadingLevel: number | null = null;
-		const excludedHeadings = new Set(this.settings.autoLinkExcludedHeadings.map(title => title.toLowerCase()));
-		let lineStart = 0;
-
 		for (const line of content.split('\n')) {
-			const lineEnd = lineStart + line.length;
-			const fence = getFenceMarker(line);
-			const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
-			if (heading?.[1] && heading[2]) {
-				const level = heading[1].length;
-				if (excludedHeadingLevel !== null && level <= excludedHeadingLevel) excludedHeadingLevel = null;
-				if (excludedHeadings.has(heading[2].trim().toLowerCase())) excludedHeadingLevel = level;
-			}
-			if (fence && !activeFence) activeFence = fence;
-			else if (activeFence && fence && fence.character === activeFence.character && fence.length >= activeFence.length) activeFence = null;
-
 			for (const target of findWikiLinkTargets(line)) {
 				const normalizedTarget = normalizeTarget(target);
 				linkedTargets.add(normalizeTarget(localWords.get(normalizedTarget) || target));
 			}
-			const intersectsRange = lineEnd >= range.from && lineStart <= range.to;
-			const skipLine = lineStart < frontmatterEnd
-				|| Boolean(activeFence) || Boolean(fence)
-				|| inHtmlComment || line.includes('<!--')
-				|| excludedHeadingLevel !== null
-				|| /^(?:\t| {4})/.test(line) || isReferenceDefinition(line)
-				|| (this.settings.autoLinkSkipHeadings && /^\s{0,3}#{1,6}\s/.test(line))
-				|| (this.settings.autoLinkSkipBlockquotes && /^\s{0,3}>/.test(line));
-
-			if (line.includes('<!--') || inHtmlComment) inHtmlComment = !line.includes('-->');
-			if (intersectsRange && !skipLine) {
-				let partOffset = 0;
-				for (const part of splitProtectedMarkdown(line)) {
-					if (!part.isProtected) {
-						WORD_PATTERN.lastIndex = 0;
-						let match: RegExpExecArray | null;
-						while ((match = WORD_PATTERN.exec(part.text)) !== null) {
-							const text = match[0];
-							const lower = text.toLowerCase();
-							const start = lineStart + partOffset + match.index;
-							const end = start + text.length;
-							if (start < range.from || end > range.to || text.length < this.settings.autoLinkMinWordLength || ignored.has(lower)) continue;
-							const target = localWords.get(getLemma(lower)) || localWords.get(lower);
-							if (!target) continue;
-							const targetKey = normalizeTarget(target);
-							if (this.settings.autoLinkFirstOnly && linkedTargets.has(targetKey)) continue;
-							linkedTargets.add(targetKey);
-							const basename = target.split('/').pop() || target;
-							const linkTarget = this.getPreferredLinkTarget(target, sourcePath);
-							occurrences.push({
-								start, end, text, target,
-								replacement: text === basename && linkTarget === basename
-									? `[[${linkTarget}]]`
-									: `[[${linkTarget}|${text}]]`,
-							});
-						}
-					}
-					partOffset += part.text.length;
-				}
+		}
+		for (const segment of this.getEditableSegments(content)) {
+			WORD_PATTERN.lastIndex = 0;
+			let match: RegExpExecArray | null;
+			while ((match = WORD_PATTERN.exec(segment.text)) !== null) {
+				const text = match[0];
+				const lower = text.toLowerCase();
+				const start = segment.start + match.index;
+				const end = start + text.length;
+				if (start < range.from || end > range.to || text.length < this.settings.autoLinkMinWordLength || ignored.has(lower)) continue;
+				const target = localWords.get(getLemma(lower)) || localWords.get(lower);
+				if (!target) continue;
+				const targetKey = normalizeTarget(target);
+				if (this.settings.autoLinkFirstOnly && linkedTargets.has(targetKey)) continue;
+				linkedTargets.add(targetKey);
+				const basename = target.split('/').pop() || target;
+				const linkTarget = this.getPreferredLinkTarget(target, sourcePath);
+				occurrences.push({
+					start, end, text, target,
+					replacement: text === basename && linkTarget === basename
+						? `[[${linkTarget}]]`
+						: `[[${linkTarget}|${text}]]`,
+				});
 			}
-			lineStart = lineEnd + 1;
 		}
 
 		const grouped = new Map<string, AutoLinkCandidate>();
@@ -172,22 +137,24 @@ export class AutoLinkService {
 		}
 		const occurrences: AutoLinkOccurrence[] = [];
 		const pattern = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
-		let match: RegExpExecArray | null;
-		while ((match = pattern.exec(content)) !== null) {
-			if (match.index > 0 && content[match.index - 1] === '!') continue;
-			const rawTarget = match[1];
-			if (!rawTarget) continue;
-			const target = canonicalTargets.get(normalizeTarget(rawTarget));
-			if (!target) continue;
-			const basename = target.split('/').pop() || target;
-			const display = match[2] || basename;
-			occurrences.push({
-				start: match.index,
-				end: match.index + match[0].length,
-				text: display,
-				target,
-				replacement: display,
-			});
+		for (const segment of this.getEditableSegments(content, true)) {
+			pattern.lastIndex = 0;
+			let match: RegExpExecArray | null;
+			while ((match = pattern.exec(segment.text)) !== null) {
+				const rawTarget = match[1];
+				if (!rawTarget) continue;
+				const target = canonicalTargets.get(normalizeTarget(rawTarget));
+				if (!target) continue;
+				const basename = target.split('/').pop() || target;
+				const display = match[2] || basename;
+				occurrences.push({
+					start: segment.start + match.index,
+					end: segment.start + match.index + match[0].length,
+					text: display,
+					target,
+					replacement: display,
+				});
+			}
 		}
 		const grouped = new Map<string, AutoLinkCandidate>();
 		for (const occurrence of occurrences) {
@@ -203,46 +170,19 @@ export class AutoLinkService {
 		const localWords = this.buildLocalWordCache();
 		const ignored = new Set(this.settings.autoLinkIgnoredWords);
 		const candidates = new Map<string, AutoLinkCandidate>();
-		const frontmatterEnd = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)?.[0].length ?? 0;
-		const excludedHeadings = new Set(this.settings.autoLinkExcludedHeadings.map(title => title.toLowerCase()));
-		let excludedHeadingLevel: number | null = null;
-		let activeFence: {character: '`' | '~'; length: number} | null = null;
-		let inHtmlComment = false;
-		let lineStart = 0;
-		for (const line of content.split('\n')) {
-			const fence = getFenceMarker(line);
-			const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
-			if (heading?.[1] && heading[2]) {
-				const level = heading[1].length;
-				if (excludedHeadingLevel !== null && level <= excludedHeadingLevel) excludedHeadingLevel = null;
-				if (excludedHeadings.has(heading[2].trim().toLowerCase())) excludedHeadingLevel = level;
+		for (const segment of this.getEditableSegments(content)) {
+			WORD_PATTERN.lastIndex = 0;
+			let match: RegExpExecArray | null;
+			while ((match = WORD_PATTERN.exec(segment.text)) !== null) {
+				const display = match[0];
+				const word = display.toLowerCase();
+				if (display.length < this.settings.autoLinkMinWordLength || ignored.has(word)
+					|| localWords.has(word) || localWords.has(getLemma(word))) continue;
+				const candidate = candidates.get(word) || {target: word, count: 0, examples: []};
+				candidate.count += 1;
+				if (!candidate.examples.includes(display) && candidate.examples.length < 3) candidate.examples.push(display);
+				candidates.set(word, candidate);
 			}
-			if (fence && !activeFence) activeFence = fence;
-			else if (activeFence && fence && fence.character === activeFence.character && fence.length >= activeFence.length) activeFence = null;
-			const skipLine = lineStart < frontmatterEnd || Boolean(activeFence) || Boolean(fence)
-				|| inHtmlComment || line.includes('<!--') || excludedHeadingLevel !== null
-				|| /^(?:\t| {4})/.test(line) || isReferenceDefinition(line)
-				|| (this.settings.autoLinkSkipHeadings && /^\s{0,3}#{1,6}\s/.test(line))
-				|| (this.settings.autoLinkSkipBlockquotes && /^\s{0,3}>/.test(line));
-			if (line.includes('<!--') || inHtmlComment) inHtmlComment = !line.includes('-->');
-			if (!skipLine) {
-				for (const part of splitProtectedMarkdown(line)) {
-					if (part.isProtected) continue;
-					WORD_PATTERN.lastIndex = 0;
-					let match: RegExpExecArray | null;
-					while ((match = WORD_PATTERN.exec(part.text)) !== null) {
-						const display = match[0];
-						const word = display.toLowerCase();
-						if (display.length < this.settings.autoLinkMinWordLength || ignored.has(word)
-							|| localWords.has(word) || localWords.has(getLemma(word))) continue;
-						const candidate = candidates.get(word) || {target: word, count: 0, examples: []};
-						candidate.count += 1;
-						if (!candidate.examples.includes(display) && candidate.examples.length < 3) candidate.examples.push(display);
-						candidates.set(word, candidate);
-					}
-				}
-			}
-			lineStart += line.length + 1;
 		}
 		return [...candidates.values()].sort((a, b) => b.count - a.count || a.target.localeCompare(b.target));
 	}
@@ -260,6 +200,15 @@ export class AutoLinkService {
 		const resolved = this.app.metadataCache.getFirstLinkpathDest(basename, sourcePath);
 		if (!resolved || normalizeTarget(resolved.path) === normalizeTarget(target)) return basename;
 		return target;
+	}
+
+	private getEditableSegments(content: string, includeWikiLinks = false) {
+		return getMarkdownEditSegments(content, {
+			excludedHeadings: this.settings.autoLinkExcludedHeadings,
+			skipHeadings: this.settings.autoLinkSkipHeadings,
+			skipBlockquotes: this.settings.autoLinkSkipBlockquotes,
+			includeWikiLinks,
+		});
 	}
 }
 

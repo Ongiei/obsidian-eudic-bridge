@@ -1,4 +1,4 @@
-import {requestUrl, RequestUrlParam, RequestUrlResponse} from 'obsidian';
+import {Platform, requestUrl, RequestUrlParam, RequestUrlResponse} from 'obsidian';
 import {DictionaryProvider} from './dictionary-provider';
 import {EcdictDatabase, EcdictEntryStore, EcdictInstallation} from './ecdict-database';
 import {createEcdictColumnMap, parseCsvRows, StoredEcdictEntry, toStoredEcdictEntry} from './utils/ecdict';
@@ -6,6 +6,7 @@ import {createEcdictColumnMap, parseCsvRows, StoredEcdictEntry, toStoredEcdictEn
 const UPSTREAM_REPOSITORY = 'skywind3000/ECDICT';
 const UPSTREAM_FILE = 'ecdict.csv';
 const UPSTREAM_COMMIT_API = `https://api.github.com/repos/${UPSTREAM_REPOSITORY}/commits?path=${UPSTREAM_FILE}&per_page=1`;
+const UPSTREAM_CONTENT_API = `https://api.github.com/repos/${UPSTREAM_REPOSITORY}/contents/${UPSTREAM_FILE}`;
 const MINIMUM_ENTRY_COUNT = 500000;
 const IMPORT_BATCH_SIZE = 1000;
 const SPEED_TEST_TIMEOUT_MS = 10000;
@@ -65,6 +66,7 @@ export const ECDICT_DOWNLOAD_SOURCES: EcdictDownloadSource[] = [
 
 export interface EcdictSourceMetadata {
 	sourceSha: string;
+	expectedBlobSha: string;
 	sourceUrl: string;
 	sourceName: string;
 }
@@ -107,7 +109,8 @@ export class EcdictManager {
 		private database: EcdictDatabase,
 		private request: RequestFunction = requestUrl,
 		private minimumEntryCount: number = MINIMUM_ENTRY_COUNT,
-		private minimumSourceBytes: number = 50_000_000
+		private minimumSourceBytes: number = 50_000_000,
+		private isMobile: boolean = Platform.isMobileApp
 	) {}
 
 	async getStatus(): Promise<EcdictStatus> {
@@ -160,6 +163,9 @@ export class EcdictManager {
 		onProgress?: (progress: EcdictProgress) => void,
 		abortSignal?: { aborted: boolean }
 	): Promise<EcdictInstallation> {
+		if (this.isMobile) {
+			throw new Error('移动端暂不支持直接安装 ECDICT：完整 CSV 会占用较高内存，可能导致 Obsidian 卡死。请先在桌面端安装；后续版本将评估分片下载与导入。');
+		}
 		onProgress?.({ phase: 'metadata', progress: 0, message: '正在检查 ECDICT 上游版本...' });
 		const source = await this.fetchSourceMetadata(sourceId);
 		this.throwIfAborted(abortSignal);
@@ -169,8 +175,16 @@ export class EcdictManager {
 		if (response.status !== 200) throw new Error(`ECDICT 下载失败：服务器返回 ${response.status}`);
 		if (response.arrayBuffer.byteLength < this.minimumSourceBytes) throw new Error('ECDICT 下载文件异常过小');
 		this.throwIfAborted(abortSignal);
+		onProgress?.({ phase: 'validate', progress: 0.04, message: '正在校验 ECDICT 下载内容完整性...' });
+		const actualBlobSha = await computeGitBlobSha(response.arrayBuffer);
+		if (actualBlobSha !== source.expectedBlobSha.toLowerCase()) {
+			throw new Error(
+				`ECDICT 完整性校验失败：下载内容与上游 commit ${source.sourceSha.slice(0, 12)} 不一致`
+			);
+		}
+		this.throwIfAborted(abortSignal);
 
-		const csvText = response.text || new TextDecoder().decode(response.arrayBuffer);
+		const csvText = new TextDecoder().decode(response.arrayBuffer);
 		const previousInstallation = await this.database.getInstallation();
 		const targetStore = await this.database.prepareImport();
 		let committed = false;
@@ -185,8 +199,9 @@ export class EcdictManager {
 
 			const installation: EcdictInstallation = {
 				key: 'installation',
-				activeStore: targetStore,
-				sourceSha: source.sourceSha,
+					activeStore: targetStore,
+					sourceSha: source.sourceSha,
+					sourceBlobSha: source.expectedBlobSha,
 				packageSize: response.arrayBuffer.byteLength,
 				entryCount: count,
 				installedAt: Date.now(),
@@ -213,7 +228,13 @@ export class EcdictManager {
 	private async fetchSourceMetadata(sourceId: EcdictDownloadSourceId): Promise<EcdictSourceMetadata> {
 		const source = ECDICT_DOWNLOAD_SOURCES.find(item => item.id === sourceId) || ECDICT_DOWNLOAD_SOURCES[0]!;
 		const sourceSha = await this.fetchUpstreamSha();
-		return { sourceSha, sourceName: source.name, sourceUrl: source.buildUrl(sourceSha, UPSTREAM_FILE) };
+		const expectedBlobSha = await this.fetchUpstreamBlobSha(sourceSha);
+		return {
+			sourceSha,
+			expectedBlobSha,
+			sourceName: source.name,
+			sourceUrl: source.buildUrl(sourceSha, UPSTREAM_FILE),
+		};
 	}
 
 	private async fetchUpstreamSha(): Promise<string> {
@@ -223,6 +244,21 @@ export class EcdictManager {
 		const first = Array.isArray(data) ? data[0] as unknown : null;
 		const sha = isRecord(first) && typeof first.sha === 'string' ? first.sha : '';
 		if (!/^[a-f0-9]{40}$/i.test(sha)) throw new Error('ECDICT 上游版本信息无效');
+		return sha;
+	}
+
+	private async fetchUpstreamBlobSha(commitSha: string): Promise<string> {
+		const response = await this.request({
+			url: `${UPSTREAM_CONTENT_API}?ref=${encodeURIComponent(commitSha)}`,
+			method: 'GET',
+			throw: false,
+		});
+		if (response.status !== 200) {
+			throw new Error(`无法获取 ECDICT 上游文件校验值：服务器返回 ${response.status}`);
+		}
+		const data = response.json as unknown;
+		const sha = isRecord(data) && typeof data.sha === 'string' ? data.sha.toLowerCase() : '';
+		if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('ECDICT 上游文件校验值无效');
 		return sha;
 	}
 
@@ -284,4 +320,15 @@ export function formatBytes(bytes: number): string {
 	const units = ['B', 'KB', 'MB', 'GB'];
 	const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
 	return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+export async function computeGitBlobSha(buffer: ArrayBuffer): Promise<string> {
+	const prefix = new TextEncoder().encode(`blob ${buffer.byteLength}\0`);
+	const bytes = new Uint8Array(prefix.byteLength + buffer.byteLength);
+	bytes.set(prefix, 0);
+	bytes.set(new Uint8Array(buffer), prefix.byteLength);
+	const digest = await window.crypto.subtle.digest('SHA-1', bytes);
+	return [...new Uint8Array(digest)]
+		.map(value => value.toString(16).padStart(2, '0'))
+		.join('');
 }

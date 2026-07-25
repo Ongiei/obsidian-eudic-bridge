@@ -47,6 +47,9 @@ export default tseslint.config(
 		},
 	},
 	globalIgnores([
+		".agents",
+		".codex",
+		".impeccable",
 		"node_modules",
 		"dist",
 		"scripts",

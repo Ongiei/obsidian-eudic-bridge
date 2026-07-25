@@ -34,6 +34,7 @@ import {AutoLinkCleanupModal} from './ui/auto-link-cleanup-modal';
 import {MissingWordModal} from './ui/missing-word-modal';
 import {SyncReconciliationModal} from './ui/sync-reconciliation-modal';
 import {createLivePreviewVirtualLinks} from './reading/live-preview-virtual-links';
+import {VirtualLinkHoverScheduler} from './reading/virtual-link-hover';
 
 interface CrossWindowDom extends Window {
 	NodeFilter: {SHOW_TEXT: number};
@@ -54,6 +55,7 @@ export default class LexiBridgePlugin extends Plugin {
 	private readonly ecdictDatabase = new EcdictDatabase();
 	private readonly ecdictManager = new EcdictManager(this.ecdictDatabase);
 	private virtualLinkPopover: VirtualLinkPopover | null = null;
+	private readonly virtualLinkHover = new VirtualLinkHoverScheduler();
 	private syncTimer: number | null = null;
 	private syncTimerRegistered: boolean = false;
 	private startupSyncTimeout: number | null = null;
@@ -93,6 +95,7 @@ export default class LexiBridgePlugin extends Plugin {
 	}
 
 	onunload() {
+		this.virtualLinkHover.cancel();
 		this.virtualLinkPopover?.close();
 		this.virtualLinkPopover = null;
 		const activePopover = activeDocument.querySelector('.lexibridge-popover');
@@ -270,11 +273,34 @@ export default class LexiBridgePlugin extends Plugin {
 	}
 
 	openLivePreviewVirtualLink(word: string, target: string, targetEl: HTMLElement, sourcePath?: string): void {
-		this.showVirtualLinkPopover(targetEl, word, target, sourcePath);
+		this.virtualLinkHover.cancel(targetEl);
+		const resolvedSourcePath = sourcePath || this.app.workspace.getActiveFile()?.path || '';
+		if (this.settings.virtualLinkClickAction === 'open-note') {
+			this.virtualLinkPopover?.close();
+			void this.app.workspace.openLinkText(target, resolvedSourcePath, true);
+			return;
+		}
+		if (this.settings.virtualLinkClickAction === 'convert-link') {
+			this.virtualLinkPopover?.close();
+			void this.convertVirtualLinksToRealLinks(resolvedSourcePath, target);
+			return;
+		}
+		this.showVirtualLinkPopover(targetEl, word, target, resolvedSourcePath);
 	}
 
 	showVirtualLinkHover(targetEl: HTMLElement, word: string, target: string, sourcePath?: string): void {
-		this.showVirtualLinkPopover(targetEl, word, target, sourcePath);
+		if (this.virtualLinkPopover?.isFor(targetEl)) {
+			this.virtualLinkPopover.keepOpen();
+			return;
+		}
+		const ownerWindow = targetEl.ownerDocument.defaultView ?? activeWindow;
+		this.virtualLinkHover.schedule(ownerWindow, targetEl, () => {
+			this.showVirtualLinkPopover(targetEl, word, target, sourcePath);
+		});
+	}
+
+	cancelVirtualLinkHover(targetEl: HTMLElement): void {
+		this.virtualLinkHover.cancel(targetEl);
 	}
 
 	private showVirtualLinkPopover(targetEl: HTMLElement, word: string, target: string, sourcePath?: string): void {
@@ -332,11 +358,12 @@ export default class LexiBridgePlugin extends Plugin {
 				virtualLink.tabIndex = 0;
 				virtualLink.setAttribute('role', 'link');
 				virtualLink.setAttribute('aria-label', `${word}：词库虚拟链接`);
-				const open = () => this.showVirtualLinkPopover(virtualLink, word, target, context.sourcePath);
+				const open = () => this.openLivePreviewVirtualLink(word, target, virtualLink, context.sourcePath);
 				virtualLink.addEventListener('click', open);
 				virtualLink.addEventListener('mouseenter', () => {
 					this.showVirtualLinkHover(virtualLink, word, target, context.sourcePath);
 				});
+				virtualLink.addEventListener('mouseleave', () => this.cancelVirtualLinkHover(virtualLink));
 				virtualLink.addEventListener('keydown', event => {
 					if (event.key === 'Enter' || event.key === ' ') {
 						event.preventDefault();
@@ -463,12 +490,11 @@ export default class LexiBridgePlugin extends Plugin {
 				dryRunResult.localAdded.length > 0 || 
 				dryRunResult.cloudAdded.length > 0 || 
 				dryRunResult.localDeleted.length > 0 || 
-				dryRunResult.cloudDeleted.length > 0;
+				dryRunResult.cloudDeleted.length > 0
+				|| (dryRunResult.localPreparations?.length ?? 0) > 0
+				|| Boolean(dryRunResult.manifestNeedsRefresh);
 
 			if (!hasChanges) {
-				if (dryRunResult.manifestMissing) {
-					await this.syncService.refreshManifestBaseline();
-				}
 				if (!isAutoSync) {
 					new Notice('未检测到变更。本地与云端已同步。', 2000);
 				}
@@ -533,8 +559,11 @@ export default class LexiBridgePlugin extends Plugin {
 				+ dryRunResult.cloudAdded.length
 				+ dryRunResult.localAdded.length
 				+ dryRunResult.cloudDeleted.length;
+		const totalPlannedActions = totalOps
+			+ (dryRunResult.localPreparations?.length ?? 0)
+			+ (dryRunResult.manifestNeedsRefresh ? 1 : 0);
 
-		if (totalOps === 0) {
+		if (totalPlannedActions === 0) {
 			new Notice('未检测到变更。本地与云端已同步。');
 			return;
 		}
@@ -543,7 +572,7 @@ export default class LexiBridgePlugin extends Plugin {
 
 		const progressNotice = new ProgressNoticeWidget(
 			'sync',
-			totalOps,
+			totalPlannedActions,
 			() => {
 				abortSignal.aborted = true;
 			}

@@ -1,4 +1,4 @@
-import {App, Notice, PluginSettingTab, Setting} from "obsidian";
+import {App, Notice, Platform, PluginSettingTab, Setting} from "obsidian";
 import type {SettingDefinitionItem} from "obsidian";
 import LexiBridgePlugin from "./main";
 import {EudicService, EudicCategory} from "./eudic";
@@ -25,6 +25,7 @@ import {markDestructive} from './ui/destructive-button';
 
 const CATEGORY_LOAD_TIMEOUT_MS = 15000;
 type SettingsTabId = 'dictionary' | 'notes' | 'reading' | 'anki' | 'sync' | 'advanced';
+export type VirtualLinkClickAction = 'preview' | 'open-note' | 'convert-link';
 
 export interface LexiBridgeSettings {
 	folderPath: string;
@@ -51,6 +52,7 @@ export interface LexiBridgeSettings {
 	autoLinkExcludedHeadings: string[];
 	autoLinkSkipWordFolder: boolean;
 	virtualLinksEnabled: boolean;
+	virtualLinkClickAction: VirtualLinkClickAction;
 	enableYoudaoFallback: boolean;
 	selectionLookupSource: DictionaryProviderId;
 	youdaoMinIntervalMs: number;
@@ -84,6 +86,7 @@ export const DEFAULT_SETTINGS: LexiBridgeSettings = {
 	autoLinkExcludedHeadings: [],
 	autoLinkSkipWordFolder: true,
 	virtualLinksEnabled: false,
+	virtualLinkClickAction: 'preview',
 	enableYoudaoFallback: true,
 	selectionLookupSource: 'ecdict',
 	youdaoMinIntervalMs: 2000,
@@ -247,14 +250,18 @@ export class LexiBridgeSettingTab extends PluginSettingTab {
 				.setName('ECDICT 本地词典')
 				.setDesc('正在读取本地词典状态...');
 		} else if (!this.ecdictStatus.installed) {
-			new Setting(containerEl)
+			const setting = new Setting(containerEl)
 				.setName('ECDICT 本地词典')
-				.setDesc('尚未安装。将从 ECDICT 上游下载约 63 MB 的原始 CSV，导入后可完全离线使用。')
-				.addButton(button => {
+				.setDesc(Platform.isMobileApp
+					? '移动端暂不提供直接安装：约 63 MB CSV 的整包解析可能造成严重内存压力或卡死。请在桌面端使用 ECDICT，移动端仍可使用其他词典功能。'
+					: '尚未安装。将从 ECDICT 上游下载约 63 MB 的原始 CSV，导入后可完全离线使用。');
+			if (!Platform.isMobileApp) {
+				setting.addButton(button => {
 					button.setButtonText('下载并安装').setCta().onClick(() => {
 						void this.installEcdict();
 					});
 				});
+			}
 		} else {
 			const installation = this.ecdictStatus.installation!;
 			const installedAt = new Date(installation.installedAt).toLocaleDateString();
@@ -294,11 +301,13 @@ export class LexiBridgeSettingTab extends PluginSettingTab {
 							button.setDisabled(false);
 						}
 					});
+					button.setDisabled(Platform.isMobileApp);
 				})
 				.addButton(button => {
 					button.setButtonText('重新安装').onClick(() => {
 						void this.installEcdict();
 					});
+					button.setDisabled(Platform.isMobileApp);
 				})
 				.addButton(button => {
 					markDestructive(button.setButtonText('删除')).onClick(() => {
@@ -374,13 +383,26 @@ export class LexiBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('虚拟链接')
-			.setDesc('在阅读模式和 Live Preview 中高亮词库单词；点击后可查词、创建词元笔记或写入真实链接，不会自动修改 Markdown')
+			.setDesc('在阅读模式和 Live Preview 中标记词库单词；停留片刻后显示预览，虚拟链接本身不会修改 Markdown')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.virtualLinksEnabled)
 				.onChange(async value => {
 					this.plugin.settings.virtualLinksEnabled = value;
 					await this.plugin.saveSettings();
 					this.plugin.refreshVirtualLinks();
+				}));
+
+		new Setting(containerEl)
+			.setName('点击虚拟链接')
+			.setDesc('选择单击虚拟链接时执行的操作；悬停预览不受影响')
+			.addDropdown(dropdown => dropdown
+				.addOption('preview', '显示词条预览')
+				.addOption('open-note', '打开单词笔记')
+				.addOption('convert-link', '转换为真实链接')
+				.setValue(this.plugin.settings.virtualLinkClickAction)
+				.onChange(async value => {
+					this.plugin.settings.virtualLinkClickAction = value as VirtualLinkClickAction;
+					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)

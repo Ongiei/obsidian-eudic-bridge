@@ -6,17 +6,17 @@ Local-first dictionary tools for Obsidian, with offline English-Chinese definiti
 
 > LexiBridge is currently in `0.x` development. Features and stored data structures may still change.
 
-LexiBridge supports Obsidian 1.8.7 and later. Dictionary, note, and reading features work on desktop and mobile. Anki export requires Anki Desktop and AnkiConnect.
+LexiBridge supports Obsidian 1.8.7 and later. Dictionary lookup, note, and reading features work on desktop and mobile. The current whole-file ECDICT installer and Anki export require desktop Obsidian.
 
 ## Features
 
-- Install and query the ECDICT English-Chinese dictionary locally.
+- Install and query the ECDICT English-Chinese dictionary locally on desktop. Downloads are verified against the Git blob SHA for the selected upstream commit; direct mobile installation is disabled until a lower-memory import path is available.
 - Generate structured vocabulary notes from editable Markdown and frontmatter templates.
 - Preserve user-written content under one or more configured headings when notes are refreshed.
 - Resolve inflected words to lemma notes while preserving proper capitalization and aliases.
 - Preview and add short Obsidian WikiLinks in a selection, section, or whole document.
 - Show non-destructive virtual links in Reading view and Live Preview.
-- Hover or select a virtual link to preview the vocabulary note, open it, or convert matching occurrences to real short links.
+- Pause over a virtual link to preview its vocabulary note. Clicking can show the preview, open the note directly, or convert matching occurrences to real short links, according to the configured action.
 - Find vocabulary links that can be removed and discover words without existing vocabulary notes.
 - Optionally enrich one word at a time with Youdao.
 - Optionally synchronize selected Eudic wordbooks with matching local subfolders.
@@ -44,7 +44,7 @@ LexiBridge writes vocabulary notes under the configured folder. Templates contro
 
 Automatic linking previews every proposed change before writing. Links use the shortest unambiguous Obsidian target, preserve the displayed source text as an alias when needed, and avoid code, links, frontmatter, configured headings, and other excluded Markdown regions.
 
-Virtual links do not modify Markdown. They are visible in Reading view and Live Preview while the plugin is enabled. Their compact preview can convert all matching occurrences in the current document to real short WikiLinks so backlinks remain useful even if LexiBridge is later disabled.
+Virtual links do not modify Markdown and inherit the surrounding text color. They are visible in Reading view and Live Preview while the plugin is enabled. A short hover delay prevents previews from opening while the pointer merely passes over a word. Their click action is configurable, and the compact preview can still open the note or convert all matching occurrences in the current document to real short WikiLinks so backlinks remain useful even if LexiBridge is later disabled.
 
 ## Eudic wordbook synchronization
 

@@ -1,5 +1,10 @@
 import { parseYaml, stringifyYaml } from 'obsidian';
 import { DictEntry } from '../types';
+import {
+	normalizeUntrustedText,
+	sanitizeExternalUrl,
+	sanitizeMarkdownInline,
+} from './external-content';
 
 const LEGACY_MANAGED_BLOCK_START = '<!-- lexibridge:managed:start -->';
 const LEGACY_MANAGED_BLOCK_END = '<!-- lexibridge:managed:end -->';
@@ -152,18 +157,18 @@ export class MarkdownGenerator {
 
 	private static createContext(word: string, entry: DictEntry, options: MarkdownGenerateOptions): TemplateContext {
 		const aliases = this.getAliases(word, entry, options.originalWord);
-		const exams = options.includeExamProperties ? unique(entry.tags) : [];
+		const exams = options.includeExamProperties ? unique(entry.tags).slice(0, 200) : [];
 		const pos = options.includePosProperties ? this.getPartsOfSpeech(entry) : [];
 		const dictSource = options.dictSource ? yamlSnippet('dict_source', options.dictSource) : '';
 		const eudicLists = yamlSnippet('eudic_lists', unique(options.eudicLists || []));
 
 		return {
-			word,
-			originalWord: options.originalWord || word,
-			phonetic_uk: entry.ph_uk,
-			phonetic_us: entry.ph_us,
-			audio_uk: entry.audio_uk,
-			audio_us: entry.audio_us,
+			word: sanitizeMarkdownInline(word, 200),
+			originalWord: sanitizeMarkdownInline(options.originalWord || word, 200),
+			phonetic_uk: sanitizeMarkdownInline(entry.ph_uk, 500),
+			phonetic_us: sanitizeMarkdownInline(entry.ph_us, 500),
+			audio_uk: sanitizeExternalUrl(entry.audio_uk, {allowHttpHosts: ['dict.youdao.com']}) || '',
+			audio_us: sanitizeExternalUrl(entry.audio_us, {allowHttpHosts: ['dict.youdao.com']}) || '',
 			definitions: this.renderDefinitions(entry),
 			examples: this.renderExamples(entry),
 			forms: this.renderForms(entry),
@@ -187,7 +192,7 @@ export class MarkdownGenerator {
 		if (normalized.tags === undefined) {
 			normalized.tags = ['vocabulary'];
 		}
-		normalized.word = typeof normalized.word === 'string' && normalized.word.trim() ? normalized.word : word;
+		normalized.word = normalizeUntrustedText(word, 200);
 
 		const aliases = this.getAliases(word, entry, options.originalWord);
 		if (aliases.length > 0 && normalized.aliases === undefined) {
@@ -205,7 +210,7 @@ export class MarkdownGenerator {
 		}
 
 		if (options.includeExamProperties) {
-			const exams = unique(entry.tags);
+			const exams = unique(entry.tags).slice(0, 200);
 			if (exams.length > 0) normalized.exams = exams;
 		} else {
 			delete normalized.exams;
@@ -375,18 +380,18 @@ export class MarkdownGenerator {
 	private static getAliases(word: string, entry: DictEntry, originalWord?: string): string[] {
 		const aliases: string[] = [];
 		for (const item of entry.exchange) {
-			aliases.push(item.value);
+			aliases.push(normalizeUntrustedText(item.value, 200));
 		}
 
 		if (originalWord && originalWord.toLowerCase() !== word.toLowerCase()) {
-			aliases.push(originalWord);
+			aliases.push(normalizeUntrustedText(originalWord, 200));
 		}
 
-		return unique(aliases);
+		return unique(aliases).slice(0, 200);
 	}
 
 	private static getPartsOfSpeech(entry: DictEntry): string[] {
-		return unique(entry.definitions.map(def => def.pos.replace(/\./g, '')));
+		return unique(entry.definitions.map(def => normalizeUntrustedText(def.pos, 100).replace(/\./g, ''))).slice(0, 100);
 	}
 
 	private static renderPhonetics(entry: DictEntry): string {
@@ -395,10 +400,12 @@ export class MarkdownGenerator {
 		}
 
 		const lines = ['## 发音', ''];
-		if (entry.ph_uk) lines.push(`- 英: \`/${entry.ph_uk}/\``);
-		if (entry.ph_us) lines.push(`- 美: \`/${entry.ph_us}/\``);
-		if (entry.audio_uk) lines.push(`- 英音频: ${entry.audio_uk}`);
-		if (entry.audio_us) lines.push(`- 美音频: ${entry.audio_us}`);
+		if (entry.ph_uk) lines.push(`- 英: \`/${sanitizeMarkdownInline(entry.ph_uk, 500)}/\``);
+		if (entry.ph_us) lines.push(`- 美: \`/${sanitizeMarkdownInline(entry.ph_us, 500)}/\``);
+		const audioUk = sanitizeExternalUrl(entry.audio_uk, {allowHttpHosts: ['dict.youdao.com']});
+		const audioUs = sanitizeExternalUrl(entry.audio_us, {allowHttpHosts: ['dict.youdao.com']});
+		if (audioUk) lines.push(`- 英音频: <${audioUk}>`);
+		if (audioUs) lines.push(`- 美音频: <${audioUs}>`);
 		return lines.join('\n') + '\n';
 	}
 
@@ -408,9 +415,10 @@ export class MarkdownGenerator {
 		}
 
 		const lines = ['## 释义', ''];
-		for (const def of entry.definitions) {
-			const escapedTrans = def.trans.replace(/\[/g, '\\[');
-			lines.push(def.pos ? `- ***${def.pos}*** ${escapedTrans}` : `- ${escapedTrans}`);
+		for (const def of entry.definitions.slice(0, 200)) {
+			const pos = sanitizeMarkdownInline(def.pos, 100);
+			const translation = sanitizeMarkdownInline(def.trans);
+			lines.push(pos ? `- ***${pos}*** ${translation}` : `- ${translation}`);
 		}
 		return lines.join('\n') + '\n';
 	}
@@ -421,9 +429,12 @@ export class MarkdownGenerator {
 		}
 
 		const lines = ['## 网络翻译', ''];
-		for (const item of entry.webTrans) {
-			const numberedValues = item.value.map((v, i) => `${i + 1}. ${v}`).join(' ');
-			lines.push(`- **${item.key}**: ${numberedValues}`);
+		for (const item of entry.webTrans.slice(0, 100)) {
+			const numberedValues = item.value
+				.slice(0, 50)
+				.map((value, index) => `${index + 1}. ${sanitizeMarkdownInline(value)}`)
+				.join(' ');
+			lines.push(`- **${sanitizeMarkdownInline(item.key, 500)}**: ${numberedValues}`);
 		}
 		return lines.join('\n') + '\n';
 	}
@@ -434,9 +445,9 @@ export class MarkdownGenerator {
 		}
 
 		const lines = ['## 例句', ''];
-		for (const example of entry.bilingualExamples) {
-			lines.push(`- ${example.eng}`);
-			lines.push(`  - ${example.chn}`);
+		for (const example of entry.bilingualExamples.slice(0, 100)) {
+			lines.push(`- ${sanitizeMarkdownInline(example.eng)}`);
+			lines.push(`  - ${sanitizeMarkdownInline(example.chn)}`);
 		}
 		return lines.join('\n') + '\n';
 	}
@@ -447,8 +458,8 @@ export class MarkdownGenerator {
 		}
 
 		const lines = ['## 词形变化', ''];
-		for (const item of entry.exchange) {
-			lines.push(`- ${item.name}: ${item.value}`);
+		for (const item of entry.exchange.slice(0, 200)) {
+			lines.push(`- ${sanitizeMarkdownInline(item.name, 200)}: ${sanitizeMarkdownInline(item.value, 500)}`);
 		}
 		return lines.join('\n') + '\n';
 	}

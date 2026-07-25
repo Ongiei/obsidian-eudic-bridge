@@ -18,6 +18,13 @@ export class AnkiConnectError extends Error {
 	}
 }
 
+export class AnkiConnectUnknownResultError extends AnkiConnectError {
+	constructor(action: string, timeoutMs: number) {
+		super(`AnkiConnect 写入请求超时（${timeoutMs}ms），远端结果未知。请先重新读取 Anki 状态，不要直接重试。`, action);
+		this.name = 'AnkiConnectUnknownResultError';
+	}
+}
+
 export class AnkiConnectClient {
 	constructor(
 		private endpoint: string = DEFAULT_ANKI_ENDPOINT,
@@ -26,13 +33,16 @@ export class AnkiConnectClient {
 	) {}
 
 	async invoke<T>(action: string, params?: Record<string, unknown>): Promise<T> {
+		assertSafeEndpoint(this.endpoint);
 		const request: AnkiConnectEnvelope = { action, version: ANKI_CONNECT_VERSION };
 		if (params) request.params = params;
 
 		const raw = await withTimeout(
 			this.transport(request, this.endpoint, this.timeoutMs),
 			this.timeoutMs,
-			() => new AnkiConnectError(`AnkiConnect 请求超时（${this.timeoutMs}ms）。`, action)
+			() => isMutatingAction(action, params)
+				? new AnkiConnectUnknownResultError(action, this.timeoutMs)
+				: new AnkiConnectError(`AnkiConnect 请求超时（${this.timeoutMs}ms）。`, action)
 		);
 		const response = parseResponse<T>(raw, action);
 		if (response.error) {
@@ -277,4 +287,38 @@ function parseAnkiFields(raw: unknown): Record<string, {value: string; order?: n
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isMutatingAction(action: string, params?: Record<string, unknown>): boolean {
+	if (action === 'multi') {
+		const actions = params?.actions;
+		return Array.isArray(actions) && actions.some(item =>
+			isRecord(item) && typeof item.action === 'string' && isMutatingAction(item.action));
+	}
+	return new Set([
+		'addNotes',
+		'updateNoteFields',
+		'addTags',
+		'removeTags',
+		'suspend',
+		'deleteNotes',
+		'createDeck',
+		'createModel',
+		'updateModelTemplates',
+		'updateModelStyling',
+		'sync',
+	]).has(action);
+}
+
+function assertSafeEndpoint(endpoint: string): void {
+	let parsed: URL;
+	try {
+		parsed = new URL(endpoint);
+	} catch {
+		throw new AnkiConnectError('AnkiConnect 地址格式无效。', 'endpoint');
+	}
+	if (parsed.protocol === 'https:') return;
+	const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+	if (parsed.protocol === 'http:' && localHosts.has(parsed.hostname.toLowerCase())) return;
+	throw new AnkiConnectError('非本机 AnkiConnect 地址必须使用 HTTPS。', 'endpoint');
 }

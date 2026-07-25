@@ -9,32 +9,47 @@ export function renderPhoneticButtons(container: HTMLElement, entry: DictEntry):
 
 	const ownerDocument = container.ownerDocument ?? activeDocument;
 	const ownerWindow = (ownerDocument.defaultView ?? activeWindow) as AudioWindow;
-	const phoneticContainer = ownerDocument.createElement('div');
-	phoneticContainer.className = 'dict-phonetic-container';
+	const phoneticContainer = container.createDiv({
+		cls: 'dict-phonetic-container',
+		attr: {
+			role: 'group',
+			'aria-label': '发音',
+		},
+	});
 
 	if (entry.ph_uk) {
-		const ukPhoneticBtn = ownerDocument.createElement('button');
-		ukPhoneticBtn.type = 'button';
-		ukPhoneticBtn.className = 'dict-phonetic-btn';
-		ukPhoneticBtn.textContent = `英 /${entry.ph_uk}/`;
+		const ukPhoneticBtn = phoneticContainer.createEl('button', {
+			cls: 'dict-phonetic-btn',
+			text: `英 /${entry.ph_uk}/`,
+			attr: {
+				type: 'button',
+				'aria-label': `播放英式发音：${entry.ph_uk}`,
+			},
+		});
 		if (entry.audio_uk) {
 			ukPhoneticBtn.addEventListener('click', () => playAudio(entry.audio_uk, ownerWindow));
+		} else {
+			ukPhoneticBtn.disabled = true;
+			ukPhoneticBtn.setAttribute('aria-label', `英式音标：${entry.ph_uk}，无可用音频`);
 		}
-		phoneticContainer.appendChild(ukPhoneticBtn);
 	}
 
 	if (entry.ph_us) {
-		const usPhoneticBtn = ownerDocument.createElement('button');
-		usPhoneticBtn.type = 'button';
-		usPhoneticBtn.className = 'dict-phonetic-btn';
-		usPhoneticBtn.textContent = `美 /${entry.ph_us}/`;
+		const usPhoneticBtn = phoneticContainer.createEl('button', {
+			cls: 'dict-phonetic-btn',
+			text: `美 /${entry.ph_us}/`,
+			attr: {
+				type: 'button',
+				'aria-label': `播放美式发音：${entry.ph_us}`,
+			},
+		});
 		if (entry.audio_us) {
 			usPhoneticBtn.addEventListener('click', () => playAudio(entry.audio_us, ownerWindow));
+		} else {
+			usPhoneticBtn.disabled = true;
+			usPhoneticBtn.setAttribute('aria-label', `美式音标：${entry.ph_us}，无可用音频`);
 		}
-		phoneticContainer.appendChild(usPhoneticBtn);
 	}
-
-	container.appendChild(phoneticContainer);
 }
 
 function playAudio(audioUrl: string, ownerWindow: AudioWindow): void {
