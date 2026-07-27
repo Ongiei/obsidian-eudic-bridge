@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-lexibridge",
-	"version": "0.3.19",
+	"version": "0.3.20",
 	"description": "Local-first dictionary toolkit with offline definitions, online enrichment, and wordbook sync.",
 	"main": "main.js",
 	"type": "module",
@@ -16,7 +16,7 @@
 		"lint": "eslint .",
 		"test:ecdict-real": "node scripts/test-ecdict-real-data.mjs",
 		"test:anki-manual": "node scripts/manual-anki-acceptance.mjs",
-		"test": "node scripts/test-external-content.mjs && node scripts/test-markdown-generator.mjs && node scripts/test-ecdict-utils.mjs && node scripts/test-ecdict-service.mjs && node scripts/test-eudic-api.mjs && node scripts/test-youdao-provider.mjs && node scripts/test-sync-utils.mjs && node scripts/test-sync-service.mjs && node scripts/test-virtual-link-hover.mjs && node scripts/test-auto-link-utils.mjs && node scripts/test-vault-files.mjs && node scripts/test-batch-update-utils.mjs && node scripts/test-settings-data.mjs && node scripts/test-anki-utils.mjs && node scripts/check-mobile-compat.mjs"
+		"test": "node scripts/test-external-content.mjs && node scripts/test-markdown-generator.mjs && node scripts/test-ecdict-utils.mjs && node scripts/test-ecdict-service.mjs && node scripts/test-eudic-api.mjs && node scripts/test-youdao-provider.mjs && node scripts/test-sync-utils.mjs && node scripts/test-sync-service.mjs && node scripts/test-virtual-link-hover.mjs && node scripts/test-virtual-link-matches.mjs && node scripts/test-virtual-link-scope.mjs && node scripts/test-auto-link-utils.mjs && node scripts/test-vault-files.mjs && node scripts/test-batch-update-utils.mjs && node scripts/test-settings-data.mjs && node scripts/test-anki-utils.mjs && node scripts/check-mobile-compat.mjs"
 	},
 	"keywords": [],
 	"license": "0-BSD",

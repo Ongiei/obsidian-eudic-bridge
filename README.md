@@ -44,7 +44,7 @@ LexiBridge writes vocabulary notes under the configured folder. Templates contro
 
 Automatic linking previews every proposed change before writing. Links use the shortest unambiguous Obsidian target, preserve the displayed source text as an alias when needed, and avoid code, links, frontmatter, configured headings, and other excluded Markdown regions.
 
-Virtual links do not modify Markdown and inherit the surrounding text color. They are visible in Reading view and Live Preview while the plugin is enabled. A short hover delay prevents previews from opening while the pointer merely passes over a word. Their click action is configurable, and the compact preview can still open the note or convert all matching occurrences in the current document to real short WikiLinks so backlinks remain useful even if LexiBridge is later disabled.
+Virtual links do not modify Markdown and inherit the surrounding text color. They are rendered only in the foreground Obsidian window and only inside the note body in Reading view or Live Preview; Markdown-rendered TOC/outline side panels and background windows are excluded. A short hover delay prevents previews from opening while the pointer merely passes over a word. Their click action is configurable, and the compact preview can still open the note or convert all matching occurrences in the current document to real short WikiLinks so backlinks remain useful even if LexiBridge is later disabled.
 
 ## Eudic wordbook synchronization
 

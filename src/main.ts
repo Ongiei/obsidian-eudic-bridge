@@ -35,6 +35,8 @@ import {MissingWordModal} from './ui/missing-word-modal';
 import {SyncReconciliationModal} from './ui/sync-reconciliation-modal';
 import {createLivePreviewVirtualLinks} from './reading/live-preview-virtual-links';
 import {VirtualLinkHoverScheduler} from './reading/virtual-link-hover';
+import {findVirtualLinkWordMatches} from './reading/virtual-link-matches';
+import {isForegroundDocument, isInsideVirtualLinkContainer} from './reading/virtual-link-scope';
 
 interface CrossWindowDom extends Window {
 	NodeFilter: {SHOW_TEXT: number};
@@ -64,6 +66,8 @@ export default class LexiBridgePlugin extends Plugin {
 	private syncRibbonIcon: HTMLElement | null = null;
 	private batchRibbonIcon: HTMLElement | null = null;
 	private autoLinkRibbonIcon: HTMLElement | null = null;
+	private readonly virtualLinkWindows = new WeakSet<Window>();
+	private readonly virtualLinkRefreshFrames = new Map<Window, number>();
 
 	async onload() {
 		await this.loadSettings();
@@ -95,6 +99,10 @@ export default class LexiBridgePlugin extends Plugin {
 	}
 
 	onunload() {
+		for (const [ownerWindow, frame] of this.virtualLinkRefreshFrames) {
+			ownerWindow.cancelAnimationFrame(frame);
+		}
+		this.virtualLinkRefreshFrames.clear();
 		this.virtualLinkHover.cancel();
 		this.virtualLinkPopover?.close();
 		this.virtualLinkPopover = null;
@@ -249,19 +257,26 @@ export default class LexiBridgePlugin extends Plugin {
 	private registerVirtualLinks(): void {
 		this.registerMarkdownPostProcessor((element, context) => {
 			if (!this.settings.virtualLinksEnabled
+				|| !context.sourcePath
+				|| !this.isReadingViewVirtualLinkElement(element)
 				|| (this.settings.autoLinkSkipWordFolder && this.isWordNotePath(context.sourcePath))) return;
 			const service = this.ensureAutoLinkService();
 			this.decorateVirtualLinks(element, context, service);
 		});
+		this.registerVirtualLinkWindowListeners();
 	}
 
 	refreshVirtualLinks(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
 			if (!(leaf.view instanceof MarkdownView)) continue;
-			leaf.view.previewMode.rerender(true);
+			if (leaf.view.getMode() === 'preview') leaf.view.previewMode.rerender(true);
 			const editorView = (leaf.view.editor as Editor & {cm?: {dispatch: (spec?: object) => void}}).cm;
 			editorView?.dispatch({});
 		}
+	}
+
+	isVirtualLinkDocumentActive(ownerDocument: Document): boolean {
+		return isForegroundDocument(ownerDocument, activeDocument);
 	}
 
 	resolveAutoLinkTarget(word: string): string | null {
@@ -341,13 +356,11 @@ export default class LexiBridgePlugin extends Plugin {
 		}
 		for (const node of nodes) {
 			const text = node.data;
-			const pattern = /\b[a-zA-Z]+(?:[-'][a-zA-Z]+)*\b/g;
-			let match: RegExpExecArray | null;
 			let lastEnd = 0;
 			let changed = false;
 			const fragment = ownerDocument.createDocumentFragment();
-			while ((match = pattern.exec(text)) !== null) {
-				const word = match[0];
+			for (const match of findVirtualLinkWordMatches(text)) {
+				const word = match.word;
 				if (word.length < this.settings.autoLinkMinWordLength || ignored.has(word.toLowerCase())) continue;
 				const target = service.findLocalWord(word);
 				if (!target) continue;
@@ -379,6 +392,55 @@ export default class LexiBridgePlugin extends Plugin {
 				node.replaceWith(fragment);
 			}
 		}
+	}
+
+	private isReadingViewVirtualLinkElement(element: HTMLElement): boolean {
+		if (!this.isVirtualLinkDocumentActive(element.ownerDocument)) return false;
+		const containers: HTMLElement[] = [];
+		this.app.workspace.iterateAllLeaves(leaf => {
+			if (!(leaf.view instanceof MarkdownView)
+				|| leaf.view.previewMode.containerEl.ownerDocument !== element.ownerDocument) return;
+			containers.push(leaf.view.previewMode.containerEl);
+		});
+		return isInsideVirtualLinkContainer(element, containers);
+	}
+
+	private registerVirtualLinkWindowListeners(): void {
+		const registerLeafWindow = (leaf: WorkspaceLeaf) => {
+			const ownerWindow = leaf.view.containerEl.ownerDocument.defaultView;
+			if (ownerWindow) this.registerVirtualLinkWindow(ownerWindow);
+		};
+		this.app.workspace.iterateAllLeaves(registerLeafWindow);
+		const mainWindow = this.app.workspace.containerEl.ownerDocument.defaultView;
+		if (mainWindow) this.registerVirtualLinkWindow(mainWindow);
+		this.registerEvent(this.app.workspace.on('window-open', (_workspaceWindow, ownerWindow) => {
+			this.registerVirtualLinkWindow(ownerWindow);
+			this.scheduleVirtualLinkRefresh(ownerWindow);
+		}));
+		this.registerEvent(this.app.workspace.on('window-close', (_workspaceWindow, ownerWindow) => {
+			const frame = this.virtualLinkRefreshFrames.get(ownerWindow);
+			if (frame !== undefined) ownerWindow.cancelAnimationFrame(frame);
+			this.virtualLinkRefreshFrames.delete(ownerWindow);
+		}));
+	}
+
+	private registerVirtualLinkWindow(ownerWindow: Window): void {
+		if (this.virtualLinkWindows.has(ownerWindow)) return;
+		this.virtualLinkWindows.add(ownerWindow);
+		this.registerDomEvent(ownerWindow, 'focus', () => this.scheduleVirtualLinkRefresh(ownerWindow));
+		this.registerDomEvent(ownerWindow, 'blur', () => this.scheduleVirtualLinkRefresh(ownerWindow));
+	}
+
+	private scheduleVirtualLinkRefresh(ownerWindow: Window): void {
+		for (const [scheduledWindow, frame] of this.virtualLinkRefreshFrames) {
+			scheduledWindow.cancelAnimationFrame(frame);
+		}
+		this.virtualLinkRefreshFrames.clear();
+		const frame = ownerWindow.requestAnimationFrame(() => {
+			this.virtualLinkRefreshFrames.delete(ownerWindow);
+			this.refreshVirtualLinks();
+		});
+		this.virtualLinkRefreshFrames.set(ownerWindow, frame);
 	}
 
 	private registerProtocolHandler(): void {

@@ -128,8 +128,16 @@ const installFile = new TFile('LexiBridge/install.md');
 const testFile = new TFile('LexiBridge/nested/test.md');
 const threadFile = new TFile('LexiBridge/thread.md');
 const colorFile = new TFile('LexiBridge/color.md');
+const canFile = new TFile('LexiBridge/Category/can.md');
 const externalThreadFile = new TFile('Notes/thread.md');
-const folder = new TFolder('LexiBridge', [installFile, threadFile, colorFile, new TFolder('LexiBridge/nested', [testFile])]);
+const externalCanFile = new TFile('Listening Library/Artists/Can.md');
+const folder = new TFolder('LexiBridge', [
+	installFile,
+	threadFile,
+	colorFile,
+	new TFolder('LexiBridge/nested', [testFile]),
+	new TFolder('LexiBridge/Category', [canFile]),
+]);
 const app = {
 	vault: {getAbstractFileByPath: path => path === 'LexiBridge' ? folder : null},
 	metadataCache: {
@@ -140,12 +148,15 @@ const app = {
 		},
 		getFirstLinkpathDest: (linktext, sourcePath) => {
 			if (sourcePath === 'Conflict.md' && linktext === 'thread') return externalThreadFile;
+			if (sourcePath === 'Shortest.md' && linktext === 'can') return externalCanFile;
+			if (sourcePath === 'Shortest.md' && linktext === 'Category/can') return canFile;
 			return new Map([
 				['install', installFile],
 				['test', testFile],
 				['thread', threadFile],
 				['color', colorFile],
 				['colour', colorFile],
+				['can', canFile],
 			]).get(linktext) || null;
 		},
 	},
@@ -178,6 +189,9 @@ assert.equal(sourcedLinked, '[[install|installed]] [[test]] [[thread|Thread]] [[
 
 const conflictPlan = service.createPlan('Thread', undefined, 'Conflict.md');
 assert.equal(conflictPlan.occurrences[0]?.replacement, '[[LexiBridge/thread|Thread]]');
+
+const shortestPlan = service.createPlan('can', undefined, 'Shortest.md');
+assert.equal(shortestPlan.occurrences[0]?.replacement, '[[Category/can]]');
 
 const selectionPlan = service.createPlan('install test', {from: 8, to: 12});
 assert.deepEqual(selectionPlan.occurrences.map(item => item.text), ['test']);

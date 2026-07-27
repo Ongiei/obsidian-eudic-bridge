@@ -3,9 +3,7 @@ import {RangeSetBuilder} from '@codemirror/state';
 import {Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate} from '@codemirror/view';
 import {editorInfoField, editorLivePreviewField} from 'obsidian';
 import type LexiBridgePlugin from '../main';
-
-const WORD_PATTERN = /\b[a-zA-Z]+(?:[-'][a-zA-Z]+)*\b/g;
-const EXCLUDED_SYNTAX = /code|link|url|frontmatter|html|comment|tag|formatting|escape/i;
+import {findVirtualLinkWordMatches, isExcludedVirtualLinkSyntax} from './virtual-link-matches';
 
 export function createLivePreviewVirtualLinks(plugin: LexiBridgePlugin) {
 	return ViewPlugin.fromClass(class {
@@ -58,7 +56,9 @@ export function createLivePreviewVirtualLinks(plugin: LexiBridgePlugin) {
 
 function buildDecorations(view: EditorView, plugin: LexiBridgePlugin): DecorationSet {
 	const builder = new RangeSetBuilder<Decoration>();
-	if (!plugin.settings.virtualLinksEnabled || !view.state.field(editorLivePreviewField, false)) return builder.finish();
+	if (!plugin.settings.virtualLinksEnabled
+		|| !plugin.isVirtualLinkDocumentActive(view.dom.ownerDocument)
+		|| !view.state.field(editorLivePreviewField, false)) return builder.finish();
 	const sourceFile = view.state.field(editorInfoField, false)?.file;
 	if (!sourceFile || (plugin.settings.autoLinkSkipWordFolder && plugin.isWordNote(sourceFile.path))) return builder.finish();
 
@@ -66,10 +66,8 @@ function buildDecorations(view: EditorView, plugin: LexiBridgePlugin): Decoratio
 	const excludedLines = findExcludedLines(view.state.doc.toString(), plugin.settings.autoLinkExcludedHeadings);
 	for (const {from, to} of view.visibleRanges) {
 		const text = view.state.sliceDoc(from, to);
-		WORD_PATTERN.lastIndex = 0;
-		let match: RegExpExecArray | null;
-		while ((match = WORD_PATTERN.exec(text)) !== null) {
-			const word = match[0];
+		for (const match of findVirtualLinkWordMatches(text)) {
+			const word = match.word;
 			const start = from + match.index;
 			const end = start + word.length;
 			if (word.length < plugin.settings.autoLinkMinWordLength || ignored.has(word.toLowerCase())) continue;
@@ -97,7 +95,7 @@ function buildDecorations(view: EditorView, plugin: LexiBridgePlugin): Decoratio
 function isExcludedSyntax(view: EditorView, position: number): boolean {
 	let node = syntaxTree(view.state).resolveInner(position, -1);
 	while (node) {
-		if (EXCLUDED_SYNTAX.test(node.name)) return true;
+		if (isExcludedVirtualLinkSyntax(node.name)) return true;
 		node = node.parent!;
 	}
 	return false;

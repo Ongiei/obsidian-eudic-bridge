@@ -103,7 +103,7 @@ export class AutoLinkService {
 				const linkTarget = this.getPreferredLinkTarget(target, sourcePath);
 				occurrences.push({
 					start, end, text, target,
-					replacement: text === basename && linkTarget === basename
+					replacement: text === basename
 						? `[[${linkTarget}]]`
 						: `[[${linkTarget}|${text}]]`,
 				});
@@ -194,11 +194,15 @@ export class AutoLinkService {
 	}
 
 	private getPreferredLinkTarget(target: string, sourcePath?: string): string {
-		const basename = target.split('/').pop() || target;
+		const parts = target.split('/');
+		const basename = parts[parts.length - 1] || target;
 		if (!sourcePath) return basename;
 
-		const resolved = this.app.metadataCache.getFirstLinkpathDest(basename, sourcePath);
-		if (!resolved || normalizeTarget(resolved.path) === normalizeTarget(target)) return basename;
+		for (let partCount = 1; partCount <= parts.length; partCount++) {
+			const candidate = parts.slice(-partCount).join('/');
+			const resolved = this.app.metadataCache.getFirstLinkpathDest(candidate, sourcePath);
+			if (resolved && normalizeTarget(resolved.path) === normalizeTarget(target)) return candidate;
+		}
 		return target;
 	}
 
